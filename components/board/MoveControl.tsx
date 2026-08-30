@@ -2,17 +2,20 @@
 
 import { useMemo } from 'react';
 
-import { bestPlacementOnTech, withoutJob } from '@/lib/plan';
+import { legalCount, previewMoves } from '@/lib/moves';
 import { formatTime } from '@/lib/time';
 import type { Job, Plan, Technician } from '@/lib/types';
 
 /**
- * Requirement 4, the dispatcher's hand on the board.
+ * Requirement 4, the dispatcher's hand — and the keyboard route to it.
  *
  * Every technician is listed, and each option is pre-flighted through
- * checkFeasible before it is opened: legal moves show the time the job would
- * start, illegal ones name the rule that stops them. Choosing an illegal one
- * still reports up, so the board can state the rejection in full.
+ * checkFeasible before the list is opened: legal moves show the time the job
+ * would start, illegal ones name the rule. Choosing an illegal one still
+ * reports up, so the board can state the rejection in full.
+ *
+ * The verdicts come from the same previewMoves() the drag layer uses, so the
+ * dropdown and the drag can never disagree about what is legal.
  */
 
 interface Props {
@@ -26,22 +29,11 @@ interface Props {
 }
 
 export function MoveControl({ job, plan, technicians, currentTechId, onMove, label = 'Move to…' }: Props) {
-  // The move is judged against a board with this job lifted off, so a job never
-  // blocks itself.
-  const options = useMemo(() => {
-    const lifted = currentTechId ? withoutJob(plan, job.id, technicians) : plan;
-    return technicians.map((tech) => {
-      if (tech.id === currentTechId) {
-        return { tech, ok: false as const, text: 'current technician', current: true };
-      }
-      const attempt = bestPlacementOnTech(lifted, job, tech);
-      return attempt.ok
-        ? { tech, ok: true as const, text: `starts ${formatTime(attempt.placement.result.start)}`, current: false }
-        : { tech, ok: false as const, text: attempt.rule, current: false };
-    });
-  }, [job, plan, technicians, currentTechId]);
-
-  const legal = options.filter((o) => o.ok).length;
+  const options = useMemo(
+    () => previewMoves(plan, job, technicians, currentTechId),
+    [plan, job, technicians, currentTechId],
+  );
+  const legal = legalCount(options);
 
   return (
     <label className="flex min-w-0 flex-1 items-center gap-1.5">
@@ -59,7 +51,12 @@ export function MoveControl({ job, plan, technicians, currentTechId, onMove, lab
         </option>
         {options.map((o) => (
           <option key={o.tech.id} value={o.tech.id} disabled={o.current}>
-            {o.ok ? '✓' : '✗'} {o.tech.id} {o.tech.name} — {o.text}
+            {o.current ? '•' : o.ok ? '✓' : '✗'} {o.tech.id} {o.tech.name} —{' '}
+            {o.current
+              ? 'current technician'
+              : o.ok
+                ? `starts ${formatTime(o.start ?? 0)}`
+                : o.rule}
           </option>
         ))}
       </select>

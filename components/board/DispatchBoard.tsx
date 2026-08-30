@@ -1,5 +1,16 @@
 'use client';
 
+import {
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  pointerWithin,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from '@dnd-kit/core';
 import { AnimatePresence, LayoutGroup, motion } from 'framer-motion';
 import { useCallback, useMemo, useState } from 'react';
 
@@ -13,7 +24,8 @@ import {
   totalIdle,
   withoutJob,
 } from '@/lib/plan';
-import { skillColours } from '@/lib/palette';
+import { previewFor, previewMoves, type MovePreview } from '@/lib/moves';
+import { colourFor, skillColours } from '@/lib/palette';
 import { callInSick, insertEmergency } from '@/lib/replan';
 import { scorePlan } from '@/lib/score';
 import { randomBaselineForCase, solveCase, type BaselineStats, type SolveStats } from '@/lib/solver';
@@ -25,6 +37,7 @@ import { BlockedPanel } from './BlockedPanel';
 import { CityMap } from './CityMap';
 import { EmergencyForm } from './EmergencyForm';
 import { Header, type BoardView } from './Header';
+import { JobChip } from './JobChip';
 import { Legend } from './Legend';
 import { TechnicianLane } from './TechnicianLane';
 
@@ -33,7 +46,8 @@ type Notice =
   | { kind: 'moved'; jobCode: string; techName: string; start: number }
   | { kind: 'already-there'; jobCode: string; techName: string; start: number }
   | { kind: 'sick'; techName: string; rehomed: number; stranded: number }
-  | { kind: 'emergency'; jobCode: string; placed: boolean; untouched: number; stranded: number };
+  | { kind: 'emergency'; jobCode: string; placed: boolean; untouched: number; stranded: number }
+  | { kind: 'unassigned'; jobCode: string; techName: string };
 
 export function DispatchBoard() {
   const [caseId, setCaseId] = useState<string>(DEFAULT_CASE_ID);
@@ -54,6 +68,13 @@ export function DispatchBoard() {
   const [extraJobs, setExtraJobs] = useState<Job[]>([]);
   const [emergencyOpen, setEmergencyOpen] = useState(false);
   const [nowMinutes, setNowMinutes] = useState<number | null>(null);
+
+  /** The job currently in the air, with the verdict for every technician. */
+  const [dragging, setDragging] = useState<{
+    jobId: string;
+    from: string | null;
+    previews: MovePreview[];
+  } | null>(null);
 
   const [view, setView] = useState<BoardView>('timeline');
   // Hovering a lane lights its route on the map, and vice versa.
@@ -84,6 +105,7 @@ export function DispatchBoard() {
     setEmergencyOpen(false);
     setNowMinutes(null);
     setHighlightTechId(null);
+    setDragging(null);
     setView('timeline');
   }, []);
 
@@ -200,6 +222,65 @@ export function DispatchBoard() {
     [plan, day, activeTechnicians, allJobs, sick],
   );
 
+  /** Take a job off the board by hand. The blocked list then says it is placeable. */
+  const unassign = useCallback(
+    (jobId: string) => {
+      if (!plan) return;
+      const job = plan.jobs[jobId];
+      const from = findTechForJob(plan, jobId);
+      if (!job || !from) return;
+      const tech = day.technicians.find((t) => t.id === from);
+
+      setPlan(refreshPlan(withoutJob(plan, jobId, day.technicians), activeTechnicians, allJobs));
+      setNotice({ kind: 'unassigned', jobCode: job.code, techName: tech?.name ?? from });
+      setSelectedJobId(jobId);
+      setEdits((n) => n + 1);
+    },
+    [plan, day, activeTechnicians, allJobs],
+  );
+
+  // ---- Drag and drop ----------------------------------------------------
+
+  // A few pixels of travel before a drag begins, so a click still selects.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor),
+  );
+
+  const onDragStart = useCallback(
+    (event: DragStartEvent) => {
+      if (!plan) return;
+      const jobId = String(event.active.id).replace(/^job:/, '');
+      const job = plan.jobs[jobId];
+      if (!job) return;
+      const from = findTechForJob(plan, jobId);
+      // Every lane is judged once, here, so the board can answer before the
+      // dispatcher lets go rather than after.
+      setDragging({ jobId, from, previews: previewMoves(plan, job, day.technicians, from) });
+      setNotice(null);
+    },
+    [plan, day],
+  );
+
+  const onDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const active = dragging;
+      setDragging(null);
+      if (!active || !event.over) return;
+
+      const target = String(event.over.id);
+      if (target === 'unassigned') {
+        if (active.from) unassign(active.jobId);
+        return;
+      }
+      if (target.startsWith('tech:')) {
+        move(active.jobId, target.slice('tech:'.length));
+      }
+    },
+    // `move` and `unassign` are stable per plan; dragging is read at drop time.
+    [dragging, move, unassign],
+  );
+
   /** Bonus: a technician calls in sick and their day is redistributed. */
   const markSick = useCallback(
     (techId: string) => {
@@ -243,7 +324,16 @@ export function DispatchBoard() {
     [plan, activeTechnicians, allJobs],
   );
 
+  const draggedJob = dragging ? plan?.jobs[dragging.jobId] : undefined;
+
   return (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={pointerWithin}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onDragCancel={() => setDragging(null)}
+    >
     <div className="flex h-dvh min-h-0 flex-col bg-background">
       <Header
         day={day}
@@ -322,6 +412,10 @@ export function DispatchBoard() {
                         nowMinutes={nowMinutes}
                         highlighted={highlightTechId === tech.id}
                         onHighlight={setHighlightTechId}
+                        dropVerdict={
+                          dragging ? previewFor(dragging.previews, tech.id) : undefined
+                        }
+                        draggingJobId={dragging?.jobId ?? null}
                       />
                     ))}
                   </LayoutGroup>
@@ -354,10 +448,19 @@ export function DispatchBoard() {
             selectedJobId={selectedJobId}
             onSelectJob={setSelectedJobId}
             onMove={move}
+            draggingJobId={dragging?.jobId ?? null}
+            draggingFromTech={dragging?.from ?? null}
           />
         </div>
       )}
     </div>
+
+      <DragOverlay dropAnimation={null}>
+        {draggedJob && (
+          <JobChip job={draggedJob} colour={colourFor(colours, draggedJob.skill)} />
+        )}
+      </DragOverlay>
+    </DndContext>
   );
 }
 
@@ -372,6 +475,7 @@ function noticeKey(n: Notice): string {
     case 'already-there': return `same-${n.jobCode}`;
     case 'sick': return `sick-${n.techName}-${n.rehomed}`;
     case 'emergency': return `emg-${n.jobCode}`;
+    case 'unassigned': return `off-${n.jobCode}-${n.techName}`;
   }
 }
 
@@ -416,6 +520,7 @@ function NoticeBar({ notice, onDismiss }: { notice: Notice; onDismiss: () => voi
 function label(n: Notice): string {
   switch (n.kind) {
     case 'moved': return 'Move applied';
+    case 'unassigned': return 'Taken off the board';
     case 'already-there': return 'No change';
     case 'sick': return 'Off sick';
     case 'emergency': return 'Emergency';
@@ -429,6 +534,8 @@ function sentence(n: Notice): string {
       return `${n.jobCode} cannot go to ${n.techName}. ${n.detail}`;
     case 'moved':
       return `${n.jobCode} moved to ${n.techName}, starting ${formatTime(n.start)}.`;
+    case 'unassigned':
+      return `${n.jobCode} taken off ${n.techName}'s day. It is unassigned now, not blocked — the panel on the right will say who can still take it.`;
     case 'already-there':
       return `${n.jobCode} is already on ${n.techName}’s day, starting ${formatTime(n.start)}.`;
     case 'sick':
@@ -462,8 +569,9 @@ function HowToStrip({
       <p className="text-[12.5px] text-muted-foreground">
         {view === 'timeline' ? (
           <>
-            <span className="text-foreground">Click any job</span> to inspect it or move it ·{' '}
-            <span className="text-foreground">Hover a lane</span> to light its route on the map ·{' '}
+            <span className="text-foreground">Drag a job</span> onto another technician — every lane
+            says whether it may land before you let go ·{' '}
+            <span className="text-foreground">Click</span> to inspect ·{' '}
             <span className="text-foreground">Sick</span> redistributes a technician&rsquo;s day
           </>
         ) : (

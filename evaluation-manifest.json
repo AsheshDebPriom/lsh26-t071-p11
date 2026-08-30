@@ -15,7 +15,8 @@
     "animation": "Framer Motion 13",
     "hosting": "Vercel",
     "backend": "none — every page is a client component; all computation runs in the browser",
-    "database": "none"
+    "database": "none",
+    "drag_and_drop": "@dnd-kit/core 6.3.1"
   },
   "data_source": {
     "primary": "data/P11_route_shift_public.json",
@@ -52,8 +53,8 @@
       "id": "AT4",
       "requirement": "Let the dispatcher move a job to another technician by hand and immediately show whether that move breaks a hard rule, naming the rule.",
       "status": "complete",
-      "where": "components/board/MoveControl.tsx, components/board/DispatchBoard.tsx",
-      "evidence": "Every technician is pre-flighted through checkFeasible before the list opens; illegal destinations name the rule inline and a full rejection is stated on selection. All 25 published scripted moves are rejections spanning SKILL_MISMATCH, WINDOW_MISSED and OVERLAPS_JOB, and each is named correctly. Test: 'every published scripted manual move gets a named verdict'."
+      "where": "lib/moves.ts (previewMoves), components/board/MoveControl.tsx, components/board/TechnicianLane.tsx, components/board/DispatchBoard.tsx",
+      "evidence": "Two surfaces share one verdict function. Dragging a job shows, for every lane, whether it may land and the exact rule if not — before the pointer is released; the dropdown lists the same verdicts and is the keyboard route. Both call previewMoves(), which asks checkFeasible. All 25 published scripted moves are rejections spanning SKILL_MISMATCH, WINDOW_MISSED and OVERLAPS_JOB, and each is named correctly. Tests: \"every published scripted manual move gets a named verdict\", \"every move previewMoves calls legal really is legal\", \"every move previewMoves refuses names the rule that refuses it\"."
     }
   ],
   "hard_rules": [
@@ -103,10 +104,16 @@
       "status": "complete",
       "where": "lib/score.ts, the comparison strip in components/board/Header.tsx",
       "evidence": "10 points per job placed minus 1 point per 10 minutes of driving. Once the plan is edited by hand the header shows jobs, travel and score against the generated plan, with a restore button. 1 test."
+    },
+    {
+      "feature": "Drag and drop a job between technicians",
+      "status": "complete",
+      "where": "@dnd-kit/core in components/board/TechnicianLane.tsx and DispatchBoard.tsx, verdicts from lib/moves.ts",
+      "evidence": "Picking up a job marks every lane with whether it may land and the rule if not, before the drop. Dropping on the blocked panel takes the job off the board. The dropdown remains as the keyboard route and shares the same verdict function. 5 tests."
     }
   ],
   "verification": {
-    "tests": "npm test — 38 tests, covering one case per hard rule, all 25 published cases, route legality, timeline contiguity, blocked-list coverage, the better-than-random claim, server-rendered board markup, and all three bonus features",
+    "tests": "npm test — 43 tests, covering one case per hard rule, all 25 published cases, route legality, timeline contiguity, blocked-list coverage, the better-than-random claim, server-rendered board markup, and all three bonus features",
     "lint": "npm run lint — clean",
     "build": "npm run build — clean",
     "stats": "npm run stats — per-case optimised vs random comparison"

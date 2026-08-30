@@ -1,5 +1,7 @@
 'use client';
 
+import { useDraggable, useDroppable } from '@dnd-kit/core';
+import { motion } from 'framer-motion';
 import { useState } from 'react';
 
 import { colourFor, type SkillColours } from '@/lib/palette';
@@ -22,15 +24,48 @@ interface Props {
   selectedJobId: string | null;
   onSelectJob: (jobId: string | null) => void;
   onMove: (jobId: string, techId: string) => void;
+  draggingJobId?: string | null;
+  /** Set when the job in the air is currently on someone's day. */
+  draggingFromTech?: string | null;
 }
 
 export function BlockedPanel({
   plan, technicians, colours, selectedJobId, onSelectJob, onMove,
+  draggingJobId = null, draggingFromTech = null,
 }: Props) {
   const blocked = [...plan.blocked].sort((a, b) => a.jobId.localeCompare(b.jobId));
+  // Only a scheduled job can be dropped here; an unassigned one is already off.
+  const canDrop = draggingJobId !== null && draggingFromTech !== null;
+  const { setNodeRef, isOver } = useDroppable({ id: 'unassigned', disabled: !canDrop });
 
   return (
-    <aside className="flex h-full min-h-0 w-[25rem] shrink-0 flex-col border-l border-hairline bg-panel">
+    <aside
+      ref={setNodeRef}
+      className="relative flex h-full min-h-0 w-[25rem] shrink-0 flex-col border-l border-hairline bg-panel transition-colors"
+      style={
+        canDrop
+          ? {
+              boxShadow: isOver
+                ? 'inset 0 0 0 2px var(--alarm)'
+                : 'inset 2px 0 0 var(--muted-foreground)',
+            }
+          : undefined
+      }
+    >
+      {canDrop && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="pointer-events-none absolute inset-x-3 top-3 z-20 rounded-md border border-dashed px-3 py-2 text-center text-[12px]"
+          style={{
+            borderColor: isOver ? 'var(--alarm)' : 'var(--hairline)',
+            background: isOver ? 'var(--alarm-dim)' : 'var(--panel-2)',
+            color: isOver ? 'var(--alarm)' : 'var(--muted-foreground)',
+          }}
+        >
+          Drop here to take this job off the board
+        </motion.div>
+      )}
       <header className="border-b border-hairline px-4 py-3">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-[14px] font-semibold tracking-tight text-foreground">
@@ -69,6 +104,7 @@ export function BlockedPanel({
                 selected={selectedJobId === b.jobId}
                 onSelect={() => onSelectJob(selectedJobId === b.jobId ? null : b.jobId)}
                 onMove={onMove}
+                dragging={draggingJobId === b.jobId}
               />
             ))}
           </ul>
@@ -79,7 +115,7 @@ export function BlockedPanel({
 }
 
 function BlockedRow({
-  blocked, plan, technicians, colours, selected, onSelect, onMove,
+  blocked, plan, technicians, colours, selected, onSelect, onMove, dragging,
 }: {
   blocked: BlockedJob;
   plan: Plan;
@@ -88,9 +124,14 @@ function BlockedRow({
   selected: boolean;
   onSelect: () => void;
   onMove: (jobId: string, techId: string) => void;
+  dragging: boolean;
 }) {
   const [showAudit, setShowAudit] = useState(false);
   const job = plan.jobs[blocked.jobId];
+  const { attributes, listeners, setNodeRef } = useDraggable({
+    id: `job:${blocked.jobId}`,
+    data: { jobId: blocked.jobId, from: null },
+  });
   if (!job) return null;
 
   const placeable = blocked.nowPlaceable;
@@ -99,9 +140,18 @@ function BlockedRow({
   return (
     <li
       className={`border-b border-hairline px-4 py-3 ${selected ? 'bg-panel-2' : ''}`}
-      style={{ borderLeft: `3px solid ${accent}` }}
+      style={{ borderLeft: `3px solid ${accent}`, opacity: dragging ? 0.4 : 1 }}
     >
-      <button type="button" onClick={onSelect} className="block w-full text-left">
+      <button
+        ref={setNodeRef}
+        type="button"
+        {...listeners}
+        {...attributes}
+        onClick={onSelect}
+        title={`Drag ${job.code} onto a technician, or use the dropdown below`}
+        className="block w-full cursor-grab text-left active:cursor-grabbing"
+        style={{ touchAction: 'none' }}
+      >
         <div className="flex items-center gap-2">
           <span
             className="h-3 w-3 shrink-0 rounded-[3px]"

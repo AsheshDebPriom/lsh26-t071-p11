@@ -41,12 +41,16 @@ Open the live URL and press **Build day plan**.
   crossing the city? Areas are sized by how much work sits in them and ring in
   the alarm colour when something there cannot be done. Hovering a lane on the
   timeline lights that route, and hovering a route highlights the lane.
-- **The manual move.** Every job — on the board or in the blocked list — has a
-  dropdown listing every technician. Each option is pre-flighted through the
-  feasibility check before you open it: legal destinations show the time the job
-  would start, illegal ones name the rule. Pick an illegal one and the rejection
-  is stated in full across the top of the board. Picking a legal one applies the
-  move and the block animates into its new lane.
+- **The manual move — drag it.** Pick up any job, from a lane or from the
+  blocked list, and drag it onto another technician. The moment you lift it,
+  **every lane says whether it may land**: a green edge and the time the job
+  would start, or a red edge and the name of the rule that stops it. You are
+  told before you let go, not after. Drop it on the panel at the right to take
+  it off the board entirely.
+- **The manual move — or use the dropdown.** Every job also has a dropdown
+  listing every technician with the same verdicts, which is the keyboard route
+  and the one that survives a screenshot. Both surfaces call the same
+  `previewMoves()`, so they can never disagree about what is legal.
 - **Scripted move.** Each published case ships a `manual_move` for the AT4
   check. All 25 are deliberate rejections, and the app names every one
   correctly.
@@ -78,7 +82,7 @@ npm run dev     # http://localhost:3000
 ```
 
 ```bash
-npm test        # 38 tests: one per hard rule, all 25 published cases, the board markup
+npm test        # 43 tests: one per hard rule, all 25 published cases, the board markup
 npm run stats   # the better-than-random evidence table, case by case
 npm run build   # production build
 npm run lint
@@ -186,10 +190,19 @@ away.
 
 ### 4. Manual move, with the rule named
 
-`components/board/MoveControl.tsx`. The move is judged against a board with the
-job lifted off, so a job never blocks itself, and the same `checkFeasible` decides.
-Options are annotated before you open the list, and an illegal choice produces a
-full statement of the rejection.
+Two surfaces, one answer. `lib/moves.ts` exposes `previewMoves()`, which asks
+`checkFeasible` what would happen if a job went to each technician; the drag
+layer (`@dnd-kit/core`) and the dropdown (`components/board/MoveControl.tsx`)
+both render its result, so the board cannot offer a move it would then refuse.
+
+The move is always judged against a board with the job lifted off, so a job
+never blocks its own move. Dragging shows the verdict for every lane while the
+job is still in the air; an illegal drop is refused with the rule stated in full
+across the top of the board.
+
+Three tests pin this down: every landing the preview calls legal survives a full
+rebuild of that technician's day, every refusal names a rule and explains
+itself, and a technician who lacks the skill is never offered as a drop target.
 
 The published cases make this testable. All 25 scripted `manual_move` entries are
 rejections, spanning three different rules, and the app names each correctly:
@@ -330,9 +343,6 @@ matters on a dense board and in a screenshot.
 3. **Real geography on the map.** The layout is schematic; real coordinates and
    road shapes would let it show where a route actually goes rather than the
    order it visits areas in.
-4. **Drag and drop** to replace the move dropdown. The dropdown is more
-   informative — it pre-flights every technician and names the rule for each —
-   but dragging is what a dispatcher's hand expects.
 5. **Real travel times** by time of day, since a Dhaka afternoon is not a Dhaka
    morning, and the whole plan rests on that table.
 
@@ -353,8 +363,9 @@ lib/
   geo.ts          the schematic map layout — drawing only, never arithmetic
   replan.ts       the bonuses: sick technician, mid-day emergency
   score.ts        the plan score used to compare a hand-edited day
+  moves.ts        previewMoves — the one verdict behind the drag and the dropdown
   palette.ts      per-case skill colour assignment
-  *.test.ts       38 tests
+  *.test.ts       43 tests
 components/board/ the header, the lanes, the city map, the blocked panel,
                   the legend, the move control, the emergency form
 scripts/stats.ts  the better-than-random evidence table

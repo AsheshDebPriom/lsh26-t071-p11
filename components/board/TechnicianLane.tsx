@@ -1,10 +1,12 @@
 'use client';
 
+import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { motion } from 'framer-motion';
 
+import type { MovePreview } from '@/lib/moves';
 import { buildTimeline, type Segment } from '@/lib/plan';
 import { colourFor, type SkillColours } from '@/lib/palette';
-import { formatDuration, formatSpan } from '@/lib/time';
+import { formatDuration, formatSpan, formatTime } from '@/lib/time';
 import type { Job, Plan, Technician } from '@/lib/types';
 import { skillLabel } from '@/lib/types';
 
@@ -36,12 +38,20 @@ interface Props {
   onHighlight?: (techId: string | null) => void;
   /** Stagger the entrance so a solved plan arrives lane by lane. */
   index: number;
+  /**
+   * While a job is being dragged, what the rules say about dropping it here.
+   * Undefined when nothing is being dragged.
+   */
+  dropVerdict?: MovePreview;
+  draggingJobId?: string | null;
 }
 
 export function TechnicianLane({
   tech, plan, dayStart, dayEnd, colours, striped, selectedJobId, onSelectJob,
   onCallInSick, offSick = false, nowMinutes = null, highlighted = false, onHighlight, index,
+  dropVerdict, draggingJobId = null,
 }: Props) {
+  const { setNodeRef, isOver } = useDroppable({ id: `tech:${tech.id}`, disabled: offSick });
   const span = dayEnd - dayStart;
   const segments = buildTimeline(tech, plan);
   const route = plan.routes[tech.id] ?? [];
@@ -52,14 +62,31 @@ export function TechnicianLane({
 
   return (
     <motion.div
+      ref={setNodeRef}
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: offSick ? 0.5 : 1, y: 0 }}
       transition={{ duration: 0.28, delay: Math.min(0.3, index * 0.022) }}
       onMouseEnter={() => onHighlight?.(tech.id)}
       onMouseLeave={() => onHighlight?.(null)}
-      className={`flex items-stretch border-b border-hairline transition-colors ${
+      className={`relative flex items-stretch border-b border-hairline transition-colors ${
         highlighted ? 'bg-panel-2' : striped ? 'bg-lane-alt' : 'bg-lane'
       }`}
+      style={
+        dropVerdict && !dropVerdict.current
+          ? {
+              // While a job is in the air, every lane says whether it may land.
+              boxShadow: isOver
+                ? `inset 0 0 0 2px ${dropVerdict.ok ? 'var(--skill-2)' : 'var(--alarm)'}`
+                : `inset 2px 0 0 ${dropVerdict.ok ? 'var(--skill-2)' : 'var(--alarm)'}`,
+              background: isOver
+                ? dropVerdict.ok
+                  ? 'oklch(0.655 0.088 158 / 12%)'
+                  : 'var(--alarm-dim)'
+                : undefined,
+              opacity: offSick ? 0.5 : dropVerdict.ok ? 1 : 0.62,
+            }
+          : undefined
+      }
     >
       {/* Who this is, and the facts that constrain them. */}
       <div className="w-[15rem] shrink-0 border-r border-hairline px-3 py-2">
@@ -110,15 +137,36 @@ export function TechnicianLane({
               </>
             )}
           </span>
-          {onCallInSick && !offSick && (
-            <button
-              type="button"
-              onClick={() => onCallInSick(tech.id)}
-              title={`${tech.name} calls in sick — redistribute their remaining jobs`}
-              className="ml-auto shrink-0 rounded-full border border-hairline px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground transition-colors hover:border-[var(--alarm)] hover:text-[var(--alarm)]"
+          {dropVerdict ? (
+            <span
+              className="num ml-auto shrink-0 truncate rounded-full px-2 py-0.5 text-[10px] font-semibold"
+              style={
+                dropVerdict.current
+                  ? { background: 'oklch(1 0 0 / 8%)', color: 'var(--muted-foreground)' }
+                  : dropVerdict.ok
+                    ? { background: 'oklch(0.655 0.088 158 / 20%)', color: 'var(--skill-2)' }
+                    : { background: 'var(--alarm-dim)', color: 'var(--alarm)' }
+              }
+              title={dropVerdict.detail}
             >
-              Sick
-            </button>
+              {dropVerdict.current
+                ? 'has it'
+                : dropVerdict.ok
+                  ? `drop → ${formatTime(dropVerdict.start ?? 0)}`
+                  : dropVerdict.rule}
+            </span>
+          ) : (
+            onCallInSick &&
+            !offSick && (
+              <button
+                type="button"
+                onClick={() => onCallInSick(tech.id)}
+                title={`${tech.name} calls in sick — redistribute their remaining jobs`}
+                className="ml-auto shrink-0 rounded-full border border-hairline px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground transition-colors hover:border-[var(--alarm)] hover:text-[var(--alarm)]"
+              >
+                Sick
+              </button>
+            )
           )}
         </div>
       </div>
@@ -149,6 +197,7 @@ export function TechnicianLane({
             selected={seg.jobId != null && seg.jobId === selectedJobId}
             onSelectJob={onSelectJob}
             nowMinutes={nowMinutes}
+            dragging={seg.jobId != null && seg.jobId === draggingJobId}
           />
         ))}
       </div>
@@ -157,7 +206,7 @@ export function TechnicianLane({
 }
 
 function SegmentBlock({
-  seg, plan, tech, pct, span, colours, selected, onSelectJob, nowMinutes,
+  seg, plan, tech, pct, span, colours, selected, onSelectJob, nowMinutes, dragging,
 }: {
   seg: Segment;
   plan: Plan;
@@ -168,6 +217,7 @@ function SegmentBlock({
   selected: boolean;
   onSelectJob: (jobId: string | null) => void;
   nowMinutes: number | null;
+  dragging: boolean;
 }) {
   const left = `${pct(seg.from)}%`;
   const widthPct = ((seg.to - seg.from) / span) * 100;
@@ -195,8 +245,50 @@ function SegmentBlock({
 
   const job: Job | undefined = seg.jobId ? plan.jobs[seg.jobId] : undefined;
   if (!job) return null;
-  const colour = colourFor(colours, job.skill);
-  const started = nowMinutes !== null && seg.from <= nowMinutes;
+
+  return (
+    <JobBlock
+      job={job}
+      tech={tech}
+      colour={colourFor(colours, job.skill)}
+      left={left}
+      width={width}
+      widthPct={widthPct}
+      from={seg.from}
+      to={seg.to}
+      selected={selected}
+      onSelectJob={onSelectJob}
+      started={nowMinutes !== null && seg.from <= nowMinutes}
+      dragging={dragging}
+    />
+  );
+}
+
+/**
+ * A scheduled job. Draggable to another lane, and clickable to inspect —
+ * dnd-kit only starts a drag after a few pixels of movement, so a click still
+ * selects. The dropdown in the strip below stays as the keyboard route.
+ */
+function JobBlock({
+  job, tech, colour, left, width, widthPct, from, to, selected, onSelectJob, started, dragging,
+}: {
+  job: Job;
+  tech: Technician;
+  colour: string;
+  left: string;
+  width: string;
+  widthPct: number;
+  from: number;
+  to: number;
+  selected: boolean;
+  onSelectJob: (jobId: string | null) => void;
+  started: boolean;
+  dragging: boolean;
+}) {
+  const { attributes, listeners, setNodeRef } = useDraggable({
+    id: `job:${job.id}`,
+    data: { jobId: job.id, from: tech.id },
+  });
 
   return (
     <motion.div
@@ -213,29 +305,31 @@ function SegmentBlock({
           ? '0 0 0 2px var(--foreground), 0 4px 14px oklch(0 0 0 / 45%)'
           : '0 1px 0 oklch(1 0 0 / 22%) inset, 0 2px 6px oklch(0 0 0 / 35%)',
         zIndex: selected ? 4 : 2,
+        opacity: dragging ? 0.32 : 1,
       }}
     >
       <button
+        ref={setNodeRef}
         type="button"
+        {...listeners}
+        {...attributes}
         onClick={() => onSelectJob(selected ? null : job.id)}
         title={
           `${job.code} — ${job.customer}\n` +
           `${skillLabel(job.skill)} in ${job.area}, ${formatDuration(job.durationMin)} of work\n` +
-          `Scheduled ${formatSpan(seg.from, seg.to)} with ${tech.name}\n` +
+          `Scheduled ${formatSpan(from, to)} with ${tech.name}\n` +
           `Customer promised ${formatSpan(job.windowStart, job.windowEnd)}\n` +
-          `Click to inspect or move this job`
+          `Drag to another technician, or click to inspect`
         }
-        className="flex h-full w-full flex-col justify-center px-2 text-left leading-none outline-none"
-        style={{ color: 'oklch(0.19 0.02 250)' }}
+        className="flex h-full w-full cursor-grab flex-col justify-center px-2 text-left leading-none outline-none active:cursor-grabbing"
+        style={{ color: 'oklch(0.19 0.02 250)', touchAction: 'none' }}
       >
         <span className="num flex items-center gap-1 text-[11.5px] font-bold">
           {job.code}
           {started && <span title="Already under way">▶</span>}
         </span>
         {widthPct > 6 && (
-          <span className="mt-0.5 truncate text-[10px] font-medium opacity-80">
-            {job.area}
-          </span>
+          <span className="mt-0.5 truncate text-[10px] font-medium opacity-80">{job.area}</span>
         )}
       </button>
     </motion.div>

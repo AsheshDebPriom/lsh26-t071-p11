@@ -11,7 +11,8 @@ asset used in this repository, with its licence. Versions are the ones in
 | [next](https://github.com/vercel/next.js) | 16.3.3 | MIT | App Router, build and static export. All pages are `'use client'`; no server code. |
 | [react](https://github.com/facebook/react) | 19.2.8 | MIT | UI runtime. |
 | [react-dom](https://github.com/facebook/react) | 19.2.8 | MIT | DOM renderer; `react-dom/server` is used by the render tests. |
-| [framer-motion](https://github.com/motiondivision/motion) | 13.1.1 | MIT | Layout animation for job blocks moving between technician lanes. |
+| [framer-motion](https://github.com/motiondivision/motion) | 13.1.1 | MIT | Layout animation for job blocks moving between technician lanes, the map's route drawing, and the counting stat figures. |
+| [@dnd-kit/core](https://github.com/clauderic/dnd-kit) | 6.3.1 | MIT | Dragging a job from one technician's lane to another, with pointer and keyboard sensors. |
 | [tailwindcss](https://github.com/tailwindlabs/tailwindcss) | 4.3.3 | MIT | Styling. |
 | [@tailwindcss/postcss](https://github.com/tailwindlabs/tailwindcss) | 4.3.3 | MIT | Tailwind v4 PostCSS plugin. |
 | [shadcn](https://github.com/shadcn-ui/ui) | 4.19.0 | MIT | UI kit. Its CLI generated `components/ui/*` and the base token layer in `app/globals.css`. |

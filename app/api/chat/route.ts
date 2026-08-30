@@ -137,10 +137,16 @@ export async function POST(request: Request) {
     if (!response.ok) {
       const detail = await response.text();
       console.error('Gemini refused the request', response.status, detail.slice(0, 500));
-      return NextResponse.json(
-        { error: `The model service answered ${response.status}.` },
-        { status: 502 },
-      );
+      // A quota refusal is the one a demo actually hits, and it deserves its
+      // own words rather than a status code. Free tiers on the small models
+      // are measured in requests per minute, not per hour.
+      const message =
+        response.status === 429
+          ? 'The assistant has hit its rate limit for the moment.'
+          : response.status === 404
+            ? `No model named "${MODEL}" is available to this key.`
+            : `The model service answered ${response.status}.`;
+      return NextResponse.json({ error: message, retryable: response.status === 429 }, { status: 502 });
     }
 
     const data = (await response.json()) as {

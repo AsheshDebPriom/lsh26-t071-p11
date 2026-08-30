@@ -575,8 +575,13 @@ export function DispatchBoard() {
         const data = await res.json();
 
         if (!res.ok || data.error) {
+          // The assistant being unavailable must not leave the dispatcher with
+          // nothing: fall back to the grammar, which needs no network at all.
+          const fallback = answer(parsed, ctx);
           say(
-            `${data.error ?? 'The assistant is unavailable.'} Type help for what I can do without it.`,
+            `${data.error ?? 'The assistant is unavailable.'}
+` +
+              `${fallback?.text ?? 'Type help to see what I can do without it.'}`,
             'warn',
           );
           return;

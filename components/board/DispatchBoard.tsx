@@ -132,6 +132,18 @@ export function DispatchBoard() {
       const tech = day.technicians.find((t) => t.id === techId);
       if (!job || !tech) return;
 
+      if (sick.has(tech.id)) {
+        setNotice({
+          kind: 'rejected',
+          jobCode: job.code,
+          techName: tech.name,
+          rule: 'OUTSIDE_SHIFT',
+          detail: `${tech.name} is off sick today and is not taking work.`,
+        });
+        setSelectedJobId(jobId);
+        return;
+      }
+
       const from = findTechForJob(plan, jobId);
 
       if (from === tech.id) {
@@ -177,7 +189,7 @@ export function DispatchBoard() {
       setSelectedJobId(jobId);
       setEdits((n) => n + 1);
     },
-    [plan, day, activeTechnicians, allJobs],
+    [plan, day, activeTechnicians, allJobs, sick],
   );
 
   /** Bonus: a technician calls in sick and their day is redistributed. */
@@ -297,6 +309,7 @@ export function DispatchBoard() {
               day={day}
               colours={colours}
               plan={plan}
+              technicians={activeTechnicians}
               idleMin={totalIdle(plan, activeTechnicians)}
               selectedJobId={selectedJobId}
               onMove={move}

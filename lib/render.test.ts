@@ -5,14 +5,16 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { BlockedPanel } from '../components/board/BlockedPanel';
+import { Header } from '../components/board/Header';
 import { Legend } from '../components/board/Legend';
 import { MoveControl } from '../components/board/MoveControl';
 import { TechnicianLane } from '../components/board/TechnicianLane';
 import { PUBLISHED_CASES, caseWindow } from './cases';
 import { bestPlacementOnTech, findTechForJob, totalIdle, withoutJob } from './plan';
 import { skillColours } from './palette';
-import { solveCase } from './solver';
-import { RULE_LABEL, RULE_ORDER } from './types';
+import { randomBaselineForCase, solveCase } from './solver';
+import { scorePlan } from './score';
+import { DEFAULT_RULES, RULE_LABEL, RULE_ORDER } from './types';
 
 /**
  * The board is drawn from arithmetic, not from a chart library, so the markup
@@ -94,6 +96,7 @@ test('the legend explains all three block types and every rule', () => {
       day,
       colours,
       plan,
+      technicians: day.technicians,
       idleMin: totalIdle(plan, day.technicians),
       selectedJobId: null,
       onMove: noop,
@@ -105,7 +108,42 @@ test('the legend explains all three block types and every rule', () => {
   for (const rule of RULE_ORDER) {
     assert.ok(html.includes(RULE_LABEL[rule]), `legend explains ${rule}`);
   }
+});
+
+test('the header states what the tool is, the goal, and where the data came from', () => {
+  const { stats } = solveCase(day);
+  const html = renderToStaticMarkup(
+    createElement(Header, {
+      day,
+      cases: [day],
+      onPickCase: noop,
+      rules: DEFAULT_RULES,
+      onToggleReturnHome: noop,
+      onGenerate: noop,
+      onReset: noop,
+      solving: false,
+      hasPlan: true,
+      plan,
+      stats,
+      baseline: randomBaselineForCase(day, undefined, 5),
+      score: scorePlan(plan, day.technicians, day.jobs.length),
+      generatedScore: null,
+      edited: false,
+      onRestore: noop,
+    }),
+  );
+
+  // A first-time visitor must be told what this is before they see a number.
+  assert.match(html, /Dispatch Board/);
+  assert.match(html, /who goes where/);
+  // The goal has to be stated in words, not just implied by a figure.
+  assert.match(html, /Minimising total travel time across all technicians/);
+  // Provenance: the published case is named, so nothing is passed off as ours.
   assert.match(html, /Published case PUB-01/);
+  // The scored numbers are labelled in plain English.
+  for (const label of ['Jobs scheduled', 'Cannot be done', 'Total travel', 'Better than random']) {
+    assert.ok(html.includes(label), `header labels "${label}"`);
+  }
 });
 
 test('the move control pre-flights every technician and agrees with checkFeasible', () => {

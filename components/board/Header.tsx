@@ -2,7 +2,7 @@
 
 import type { BaselineStats, SolveStats } from '@/lib/solver';
 import { SCORE_RULE, type PlanScore } from '@/lib/score';
-import { formatDuration, formatTime } from '@/lib/time';
+import { formatDuration } from '@/lib/time';
 import type { DayCase, Plan, RuleOptions } from '@/lib/types';
 
 /**
@@ -275,4 +275,3 @@ function Delta({
   );
 }
 
-export { formatTime };

@@ -42,8 +42,27 @@ Open the live URL and press **Build day plan**.
   is stated in full across the top of the board. Picking a legal one applies the
   move and the block animates into its new lane.
 - **Scripted move.** Each published case ships a `manual_move` for the AT4
-  check. The button in the header runs that exact move. All 25 are deliberate
-  rejections, and the app names every one correctly.
+  check. All 25 are deliberate rejections, and the app names every one
+  correctly.
+
+### The three bonus features
+
+All four required items were working before any of these were started.
+
+- **A technician calls in sick.** Press **Sick** on any lane. That technician
+  greys out, their day is cleared, and every job on it is offered to whoever is
+  still on shift, tightest deadline first. Anything that will not fit anywhere
+  drops into the blocked list with the rule that stopped it — never silently.
+  Work already under way is never taken off them.
+- **An emergency job mid-day.** Press **Emergency job**, set the clock, and
+  raise a call. Everything already started at that time stays exactly where it
+  is — those technicians are on site — and only the jobs not yet started are
+  replanned, with the emergency offered first. Jobs under way are marked with a
+  ▶ on the board.
+- **A plan score, and your edits measured against the solver's.** Ten points per
+  job placed, minus one point per ten minutes of driving. As soon as you change
+  anything by hand, the header shows jobs, travel and score against the plan the
+  solver built, with a button to restore it.
 
 ## How to run it
 
@@ -53,7 +72,7 @@ npm run dev     # http://localhost:3000
 ```
 
 ```bash
-npm test        # 26 tests: one per hard rule, plus all 25 published cases
+npm test        # 34 tests: one per hard rule, all 25 published cases, the board markup
 npm run stats   # the better-than-random evidence table, case by case
 npm run build   # production build
 npm run lint
@@ -182,6 +201,18 @@ not as a rule violation — PUB-14 scripts exactly that case.
 
 ---
 
+### Bonus features
+
+| Bonus | Where | Verified by |
+| --- | --- | --- |
+| Technician calls in sick, remaining jobs redistributed | `lib/replan.ts` → `callInSick` | 3 tests: the lane is cleared, every lifted job is either rehomed or explained, and started work is left alone |
+| Emergency job mid-day, only not-yet-started jobs replanned | `lib/replan.ts` → `insertEmergency` | 3 tests: started jobs keep their exact times, the emergency is scheduled or explained, and no job is lost |
+| Plan score, manual plan compared against the generated one | `lib/score.ts`, header comparison strip | 1 test: the score follows the published rule and losing a technician cannot raise it |
+
+Every replan still routes each placement through `checkFeasible`, and the tests
+rebuild each resulting board forward from scratch to confirm every job is still
+legal where it now sits.
+
 ## The decisions that mattered
 
 **Time is an integer number of minutes from midnight, everywhere.** 540 is 09:00.
@@ -270,11 +301,9 @@ be judged against the data judges hold.
 2. **Risk of missing a window as a second objective.** Every arrival's slack
    against its window close is already computed; surfacing the tightest ones
    would let a dispatcher see fragility before the day starts, not after.
-3. **The bonus features** — a technician calling in sick, and an emergency job
-   inserted mid-day with only the not-yet-started jobs replanned. Both are small
-   given the current architecture: the plan is immutable data and the solver is a
-   pure function over it. They were not attempted because the four required items
-   come first.
+3. **Drag and drop** to replace the move dropdown. The dropdown is more
+   informative — it pre-flights every technician and names the rule for each —
+   but dragging is what a dispatcher's hand expects.
 4. **Real travel times** by time of day, since a Dhaka afternoon is not a Dhaka
    morning, and the whole plan rests on that table.
 
@@ -292,9 +321,12 @@ lib/
   solver.ts       greedy insertion, the improvement pass, the random baseline
   cases.ts        parses the published case file into the model
   seed.ts         the crafted demo day
+  replan.ts       the bonuses: sick technician, mid-day emergency
+  score.ts        the plan score used to compare a hand-edited day
   palette.ts      per-case skill colour assignment
-  *.test.ts       26 tests
-components/board/ the board, the lanes, the blocked panel, the legend, the move control
+  *.test.ts       34 tests
+components/board/ the header, the lanes, the blocked panel, the legend,
+                  the move control, the emergency form
 scripts/stats.ts  the better-than-random evidence table
 ```
 
@@ -322,6 +354,9 @@ three ambiguity calls.
 | _TBD_ | Solver: greedy insertion, improvement pass, random baseline |
 | _TBD_ | Board UI: timeline lanes, blocked panel, manual move |
 | _TBD_ | Case-file integration, deployment, documentation |
+
+Bonus features (sick technician, mid-day emergency, plan scoring) were built
+after all four required items were verified working.
 
 AI assistance (Anthropic Claude, via Claude Code) was used throughout and is
 disclosed in `EVENT.md`.

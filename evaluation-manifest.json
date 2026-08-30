@@ -53,14 +53,26 @@
       "requirement": "Let the dispatcher move a job to another technician by hand and immediately show whether that move breaks a hard rule, naming the rule.",
       "status": "complete",
       "where": "components/board/MoveControl.tsx, components/board/DispatchBoard.tsx",
-      "evidence": "Every technician is pre-flighted through checkFeasible before the list opens; illegal destinations name the rule inline and a full rejection is stated on selection. The 'Scripted move' button runs the case's published manual_move. All 25 published scripted moves are rejections spanning SKILL_MISMATCH, WINDOW_MISSED and OVERLAPS_JOB, and each is named correctly. Test: 'every published scripted manual move gets a named verdict'."
+      "evidence": "Every technician is pre-flighted through checkFeasible before the list opens; illegal destinations name the rule inline and a full rejection is stated on selection. All 25 published scripted moves are rejections spanning SKILL_MISMATCH, WINDOW_MISSED and OVERLAPS_JOB, and each is named correctly. Test: 'every published scripted manual move gets a named verdict'."
     }
   ],
   "hard_rules": [
-    { "name": "SKILL_MISMATCH", "enforced": true },
-    { "name": "WINDOW_MISSED", "enforced": true },
-    { "name": "OUTSIDE_SHIFT", "enforced": true },
-    { "name": "OVERLAPS_JOB", "enforced": true },
+    {
+      "name": "SKILL_MISMATCH",
+      "enforced": true
+    },
+    {
+      "name": "WINDOW_MISSED",
+      "enforced": true
+    },
+    {
+      "name": "OUTSIDE_SHIFT",
+      "enforced": true
+    },
+    {
+      "name": "OVERLAPS_JOB",
+      "enforced": true
+    },
     {
       "name": "NO_RETURN_TIME",
       "enforced": false,
@@ -73,9 +85,28 @@
     "Travel to the first job of the day starts from the technician's home area, and the shift clock starts then.",
     "Returning to the home area before shift end is implemented as NO_RETURN_TIME but is OFF by default, because the published format note says no return home is required."
   ],
-  "bonus_features_attempted": [],
+  "bonus_features_attempted": [
+    {
+      "feature": "A technician calls in sick and their remaining jobs are redistributed",
+      "status": "complete",
+      "where": "lib/replan.ts (callInSick), Sick button on every technician lane",
+      "evidence": "The lane is cleared and every lifted job is either rehomed or listed in the blocked list with its rule. Work already under way is never taken off them. 3 tests."
+    },
+    {
+      "feature": "An emergency job is added mid-day and only the jobs not yet started are replanned",
+      "status": "complete",
+      "where": "lib/replan.ts (insertEmergency), components/board/EmergencyForm.tsx",
+      "evidence": "Jobs already started at the set clock keep their exact technician, start and finish; everything else is replanned with the emergency offered first. 3 tests."
+    },
+    {
+      "feature": "A score for the plan, and a manual plan compared against the generated one",
+      "status": "complete",
+      "where": "lib/score.ts, the comparison strip in components/board/Header.tsx",
+      "evidence": "10 points per job placed minus 1 point per 10 minutes of driving. Once the plan is edited by hand the header shows jobs, travel and score against the generated plan, with a restore button. 1 test."
+    }
+  ],
   "verification": {
-    "tests": "npm test — 26 tests, covering one case per hard rule, all 25 published cases, route legality, timeline contiguity, blocked-list coverage, the better-than-random claim, and server-rendered board markup",
+    "tests": "npm test — 34 tests, covering one case per hard rule, all 25 published cases, route legality, timeline contiguity, blocked-list coverage, the better-than-random claim, server-rendered board markup, and all three bonus features",
     "lint": "npm run lint — clean",
     "build": "npm run build — clean",
     "stats": "npm run stats — per-case optimised vs random comparison"
@@ -83,7 +114,9 @@
   "third_party": "See LICENSES.md — complete list of dependencies, the create-next-app scaffold, shadcn/ui, fonts and event-issued data.",
   "ai_assistance": {
     "used": true,
-    "tools": ["Anthropic Claude (Claude Code)"],
+    "tools": [
+      "Anthropic Claude (Claude Code)"
+    ],
     "disclosure": "EVENT.md"
   },
   "known_limitations": [

@@ -3,7 +3,7 @@
 import { colourFor, type SkillColours } from '@/lib/palette';
 import { findTechForJob } from '@/lib/plan';
 import { formatDuration, formatSpan, formatTime } from '@/lib/time';
-import type { DayCase, Plan } from '@/lib/types';
+import type { DayCase, Plan, Technician } from '@/lib/types';
 import { RULE_LABEL, RULE_MEANING, RULE_ORDER, skillLabel } from '@/lib/types';
 
 import { MoveControl } from './MoveControl';
@@ -21,12 +21,15 @@ interface Props {
   idleMin: number;
   selectedJobId: string | null;
   onMove: (jobId: string, techId: string) => void;
+  /** Technicians still on shift. Someone off sick is not a destination. */
+  technicians: Technician[];
 }
 
-export function Legend({ day, colours, plan, idleMin, selectedJobId, onMove }: Props) {
+export function Legend({ day, colours, plan, idleMin, selectedJobId, onMove, technicians }: Props) {
   const job = selectedJobId ? plan.jobs[selectedJobId] : undefined;
   const techId = job ? findTechForJob(plan, job.id) : null;
   const tech = techId ? day.technicians.find((t) => t.id === techId) : undefined;
+  const offShiftCount = day.technicians.length - technicians.length;
   const assignment = tech ? (plan.routes[tech.id] ?? []).find((a) => a.jobId === job?.id) : undefined;
 
   const skills = Object.keys(colours).sort();
@@ -75,7 +78,7 @@ export function Legend({ day, colours, plan, idleMin, selectedJobId, onMove }: P
                 <MoveControl
                   job={job}
                   plan={plan}
-                  technicians={day.technicians}
+                  technicians={technicians}
                   currentTechId={techId}
                   onMove={onMove}
                 />
@@ -85,7 +88,7 @@ export function Legend({ day, colours, plan, idleMin, selectedJobId, onMove }: P
         </div>
       )}
 
-      <div className="flex flex-wrap items-start gap-x-8 gap-y-4 px-5 py-3">
+      <div className="flex flex-wrap items-start gap-x-8 gap-y-3 px-5 py-2.5">
         <div>
           <span className="num block text-[10.5px] uppercase tracking-wider text-muted-foreground">
             How to read a lane
@@ -150,16 +153,17 @@ export function Legend({ day, colours, plan, idleMin, selectedJobId, onMove }: P
           </ul>
         </div>
 
-        <div className="max-w-[17rem]">
-          <span className="num block text-[10.5px] uppercase tracking-wider text-muted-foreground">
-            Where the data comes from
-          </span>
-          <p className="mt-2 text-[11.5px] leading-snug text-muted-foreground">
-            {day.source === 'published'
-              ? `Published case ${day.id} from the P11 participant pack, ${day.today}. Its area-to-area travel table is taken as authoritative.`
-              : `${day.note} Invented Dhaka travel table, ${day.today}.`}
-          </p>
-        </div>
+        {offShiftCount > 0 && (
+          <div className="max-w-[15rem]">
+            <span className="num block text-[10.5px] uppercase tracking-wider text-muted-foreground">
+              Off shift
+            </span>
+            <p className="mt-2 text-[11.5px] leading-snug text-muted-foreground">
+              {offShiftCount} technician{offShiftCount === 1 ? ' is' : 's are'} off sick and cannot
+              take work.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

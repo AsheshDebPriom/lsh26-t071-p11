@@ -1,0 +1,96 @@
+{
+  "_note": "Completed from the participant-pack template. If the template in the arena differs in field names, replace this file with the official one and carry these values across before submitting.",
+  "team_id": "LSH26-T071",
+  "problem_id": "P11",
+  "problem_title": "Route and Shift Assignment Optimiser",
+  "repository_url": "https://github.com/AsheshDebPriom/lsh26-t071-p11",
+  "live_url": "https://lsh26-t071-p11.vercel.app",
+  "commit_sha": "REPLACE_WITH_40_CHARACTER_COMMIT_SHA",
+  "event_start_code": "REPLACE_WITH_EVENT_START_CODE",
+  "demo_video_url": "REPLACE_WITH_DEMO_VIDEO_URL",
+  "stack": {
+    "framework": "Next.js 16.3.3 (App Router)",
+    "language": "TypeScript 5.9",
+    "styling": "Tailwind CSS v4, shadcn/ui",
+    "animation": "Framer Motion 13",
+    "hosting": "Vercel",
+    "backend": "none — every page is a client component; all computation runs in the browser",
+    "database": "none"
+  },
+  "data_source": {
+    "primary": "data/P11_route_shift_public.json",
+    "schema_version": "2.1",
+    "cases_loaded": 25,
+    "modified": false,
+    "additional": "lib/seed.ts — one hand-built demo day, 12 technicians and 40 jobs, invented data"
+  },
+  "requirements": [
+    {
+      "id": "AT1",
+      "requirement": "At least 12 technicians with skills, shift start and end times and a home area; at least 30 jobs with an area, a required skill, a duration and a customer time window.",
+      "status": "complete",
+      "where": "data/P11_route_shift_public.json via lib/cases.ts; lib/seed.ts",
+      "evidence": "26 selectable days. Published cases carry 12-16 technicians and 30-40 jobs each. Test: 'every case meets the stated minimums'."
+    },
+    {
+      "id": "AT2",
+      "requirement": "Assignment method respecting the hard rules — right skill, inside shift hours, inside the customer time window including area-to-area travel — then improve one stated goal.",
+      "status": "complete",
+      "where": "lib/feasibility.ts (checkFeasible), lib/solver.ts",
+      "objective": "Minimise total travel time across all technicians, with jobs placed as the primary term.",
+      "objective_shown_in_ui": true,
+      "evidence": "Across all 26 days: 858 of 932 jobs placed and 9224 minutes of travel, against a random feasible baseline of 821.9 jobs and 25178 minutes — 63.4% less travel. Reproduce with `npm run stats`. On PUB-01: 34 of 37 placed, 580 min vs 873 min random."
+    },
+    {
+      "id": "AT3",
+      "requirement": "Show the day plan as a timeline per technician with jobs, travel gaps and idle time, plus a list of jobs that could not be assigned and the exact rule that blocked each one.",
+      "status": "complete",
+      "where": "components/board/TechnicianLane.tsx, components/board/BlockedPanel.tsx, components/board/Legend.tsx",
+      "evidence": "Three visually distinct block types per lane, explained in the legend. Blocked panel names the rule, the shortfall in minutes and the closest technician, and expands to the verdict for every technician. Every one of the 26 days has 2-5 blocked jobs, so the list is never empty. Tests: 'the timeline accounts for every minute of a technician shift', 'the blocked list names a rule and a human reason for every unplaced job'."
+    },
+    {
+      "id": "AT4",
+      "requirement": "Let the dispatcher move a job to another technician by hand and immediately show whether that move breaks a hard rule, naming the rule.",
+      "status": "complete",
+      "where": "components/board/MoveControl.tsx, components/board/DispatchBoard.tsx",
+      "evidence": "Every technician is pre-flighted through checkFeasible before the list opens; illegal destinations name the rule inline and a full rejection is stated on selection. The 'Scripted move' button runs the case's published manual_move. All 25 published scripted moves are rejections spanning SKILL_MISMATCH, WINDOW_MISSED and OVERLAPS_JOB, and each is named correctly. Test: 'every published scripted manual move gets a named verdict'."
+    }
+  ],
+  "hard_rules": [
+    { "name": "SKILL_MISMATCH", "enforced": true },
+    { "name": "WINDOW_MISSED", "enforced": true },
+    { "name": "OUTSIDE_SHIFT", "enforced": true },
+    { "name": "OVERLAPS_JOB", "enforced": true },
+    {
+      "name": "NO_RETURN_TIME",
+      "enforced": false,
+      "default": "off",
+      "reason": "The published P11 format note states 'the travel table is authoritative and symmetric; no return home is required'. The rule is implemented, unit-tested and switchable in the UI, and the crafted demo day enables it."
+    }
+  ],
+  "ambiguity_calls": [
+    "A job must START inside the customer time window; overrunning the window end is allowed. Arriving early is allowed and shown as idle time.",
+    "Travel to the first job of the day starts from the technician's home area, and the shift clock starts then.",
+    "Returning to the home area before shift end is implemented as NO_RETURN_TIME but is OFF by default, because the published format note says no return home is required."
+  ],
+  "bonus_features_attempted": [],
+  "verification": {
+    "tests": "npm test — 26 tests, covering one case per hard rule, all 25 published cases, route legality, timeline contiguity, blocked-list coverage, the better-than-random claim, and server-rendered board markup",
+    "lint": "npm run lint — clean",
+    "build": "npm run build — clean",
+    "stats": "npm run stats — per-case optimised vs random comparison"
+  },
+  "third_party": "See LICENSES.md — complete list of dependencies, the create-next-app scaffold, shadcn/ui, fonts and event-issued data.",
+  "ai_assistance": {
+    "used": true,
+    "tools": ["Anthropic Claude (Claude Code)"],
+    "disclosure": "EVENT.md"
+  },
+  "known_limitations": [
+    "Insertion does not ripple: a job that would fit if a later job slid is refused, which keeps every promised window intact but leaves some placeable work unplaced.",
+    "The solver is greedy plus a bounded local search, not an exact method; the 200-iteration caps are reached on larger cases.",
+    "Manual moves cannot be undone; re-solving rebuilds the plan.",
+    "Responsive down to a laptop screen only, as the brief allows. Not designed for a phone.",
+    "No persistence: reloading returns to the unsolved state."
+  ]
+}

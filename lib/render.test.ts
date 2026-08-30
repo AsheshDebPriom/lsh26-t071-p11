@@ -302,6 +302,8 @@ test('the map renders its route key on the server, before Leaflet runs', () => {
       onHighlightTech: noop,
       selectedJobId: null,
       onSelectJob: noop,
+      dayStart: window.start,
+      dayEnd: window.end,
     }),
   );
   const working = day.technicians.filter((t) => (plan.routes[t.id] ?? []).length > 0);
@@ -319,6 +321,8 @@ test('the map key says so when there is nothing to draw', () => {
       onHighlightTech: noop,
       selectedJobId: null,
       onSelectJob: noop,
+      dayStart: window.start,
+      dayEnd: window.end,
     }),
   );
   assert.match(html, /no routes to draw/);

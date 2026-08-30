@@ -49,7 +49,7 @@
       "requirement": "Show the day plan as a timeline per technician with jobs, travel gaps and idle time, plus a list of jobs that could not be assigned and the exact rule that blocked each one.",
       "status": "complete",
       "where": "components/board/TechnicianLane.tsx, components/board/CityMap.tsx, components/board/BlockedPanel.tsx, components/board/Legend.tsx",
-      "evidence": "Three visually distinct block types per lane, explained in the legend. Blocked panel names the rule, the shortfall in minutes and the closest technician, and expands to the verdict for every technician. Every one of the 26 days has 2-5 blocked jobs, so the list is never empty. Tests: 'the timeline accounts for every minute of a technician shift', 'the blocked list names a rule and a human reason for every unplaced job'. A second view draws the same plan as one route per technician on a real map of Dhaka (Leaflet with OpenStreetMap tiles; lib/geo.ts holds approximate area centroids for drawing only — the travel table stays the sole authority on distance)."
+      "evidence": "Three visually distinct block types per lane, explained in the legend. Blocked panel names the rule, the shortfall in minutes and the closest technician, and expands to the verdict for every technician. Every one of the 26 days has 2-5 blocked jobs, so the list is never empty. Tests: 'the timeline accounts for every minute of a technician shift', 'the blocked list names a rule and a human reason for every unplaced job'. A second view draws the same plan as one route per technician on a real map of Dhaka (Leaflet with OpenStreetMap tiles; lib/geo.ts holds approximate area centroids for drawing only — the travel table stays the sole authority on distance). The map also weights each leg by its travel time and names the three costliest, plays the day back so every technician can be seen at their real position at any minute, and — for a blocked job — draws every qualified technician with the distance that made the rule inevitable."
     },
     {
       "id": "AT4",
@@ -121,7 +121,7 @@
     }
   ],
   "verification": {
-    "tests": "npm test — 98 tests, covering one case per hard rule, all 25 published cases, route legality, timeline contiguity, blocked-list coverage, the better-than-random claim, server-rendered board markup, and all three bonus features",
+    "tests": "npm test — 111 tests, covering one case per hard rule, all 25 published cases, route legality, timeline contiguity, blocked-list coverage, the better-than-random claim, server-rendered board markup, and all three bonus features",
     "lint": "npm run lint — clean",
     "build": "npm run build — clean",
     "stats": "npm run stats — per-case optimised vs random comparison"

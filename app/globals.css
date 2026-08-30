@@ -252,3 +252,43 @@
   .route-leg { animation: none; stroke-dashoffset: 0; }
   .area-alarm, .area-selected { animation: none; }
 }
+
+/* A leg among the three most expensive today: the objective, made visible. */
+.route-leg-worst {
+  filter: drop-shadow(0 0 4px oklch(0.665 0.196 25 / 55%));
+}
+
+/* Reachability lines, drawn when a blocked job is selected. */
+.reach-line {
+  stroke-dasharray: 5 6;
+  animation: reach-crawl 1.2s linear infinite;
+}
+@keyframes reach-crawl {
+  to { stroke-dashoffset: -11; }
+}
+
+/* A technician part way along a leg. */
+.fleet-driving {
+  animation: fleet-pulse 1.6s ease-in-out infinite;
+}
+@keyframes fleet-pulse {
+  0%, 100% { fill-opacity: 0.75; }
+  50% { fill-opacity: 1; }
+}
+
+.fleet-label {
+  pointer-events: none;
+  white-space: nowrap;
+  transform: translate(-50%, 55%);
+  text-align: center;
+  text-shadow: 0 1px 3px oklch(0 0 0 / 90%), 0 0 8px oklch(0 0 0 / 70%);
+}
+.fleet-label span {
+  font-size: 11px;
+  font-weight: 600;
+  color: oklch(0.95 0.005 250);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reach-line, .fleet-driving { animation: none; }
+}

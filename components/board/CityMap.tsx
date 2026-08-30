@@ -3,9 +3,10 @@
 import type { Map as LeafletMap, LayerGroup, Polyline } from 'leaflet';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { arcBetween, areaLatLng } from '@/lib/geo';
-import { areaLoad, buildRoutes } from '@/lib/routes';
-import { formatDuration } from '@/lib/time';
+import { arcBetween, areaLatLng, type LatLng } from '@/lib/geo';
+import { describeReach, fleetAt, fleetSummary, reachFor } from '@/lib/playback';
+import { areaLoad, buildRoutes, longestLeg, worstLegs } from '@/lib/routes';
+import { formatDuration, formatTime } from '@/lib/time';
 import type { DayCase, Plan } from '@/lib/types';
 
 /**
@@ -52,10 +53,13 @@ interface Props {
   onHighlightTech: (techId: string | null) => void;
   selectedJobId: string | null;
   onSelectJob: (jobId: string | null) => void;
+  /** The board window, so the scrubber covers the same hours as the timeline. */
+  dayStart: number;
+  dayEnd: number;
 }
 
 export function CityMap({
-  day, plan, highlightTechId, onHighlightTech, selectedJobId, onSelectJob,
+  day, plan, highlightTechId, onHighlightTech, selectedJobId, onSelectJob, dayStart, dayEnd,
 }: Props) {
   const holder = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<LeafletMap | null>(null);
@@ -65,6 +69,46 @@ export function CityMap({
   const [ready, setReady] = useState(false);
 
   const routes = useMemo(() => buildRoutes(day, plan), [day, plan]);
+  const worst = useMemo(() => worstLegs(routes, 3), [routes]);
+  const maxLeg = useMemo(() => longestLeg(routes), [routes]);
+
+  // The scrubber. `null` means "show the whole day at once".
+  const [clock, setClock] = useState<number | null>(null);
+  const [playing, setPlaying] = useState(false);
+
+  const fleet = useMemo(
+    () => (clock === null ? [] : fleetAt(day, plan, clock)),
+    [day, plan, clock],
+  );
+  const summary = useMemo(() => fleetSummary(fleet), [fleet]);
+
+  // A blocked job turns the map into an explanation of why it was unreachable.
+  const blockedJob = useMemo(() => {
+    if (!selectedJobId) return null;
+    const isBlocked = plan.blocked.some((b) => b.jobId === selectedJobId);
+    return isBlocked ? (plan.jobs[selectedJobId] ?? null) : null;
+  }, [selectedJobId, plan]);
+
+  const reaches = useMemo(
+    () => (blockedJob ? reachFor(blockedJob, day, plan) : []),
+    [blockedJob, day, plan],
+  );
+
+  // Play runs the day at roughly four minutes of the day per frame-ish.
+  useEffect(() => {
+    if (!playing) return;
+    const id = window.setInterval(() => {
+      setClock((c) => {
+        const next = (c ?? dayStart) + 4;
+        if (next >= dayEnd) {
+          setPlaying(false);
+          return dayEnd;
+        }
+        return next;
+      });
+    }, 60);
+    return () => window.clearInterval(id);
+  }, [playing, dayStart, dayEnd]);
 
   // ---- Create the map once. --------------------------------------------
   useEffect(() => {
@@ -137,36 +181,41 @@ export function CityMap({
 
       const load = areaLoad(day, plan);
 
-      // Routes first, so the area markers sit on top of them.
+      // Routes first, so the area markers sit on top of them. A leg is drawn
+      // as thick as it is expensive: the objective, made visible.
+      const worstKeys = new Set(worst.map((w) => `${w.route.techId}|${w.leg.from}|${w.leg.to}`));
+
       routes.forEach((route, ri) => {
-        const legs: Polyline[] = [];
-        for (let i = 0; i < route.stops.length - 1; i++) {
-          const from = point(route.stops[i].area);
-          const to = point(route.stops[i + 1].area);
-          if (from.lat === to.lat && from.lng === to.lng) continue; // same area, no leg
+        const drawn: Polyline[] = [];
+        route.legs.forEach((leg) => {
+          const from = point(leg.from);
+          const to = point(leg.to);
+          const share = leg.minutes / maxLeg;
+          const isWorst = worstKeys.has(`${route.techId}|${leg.from}|${leg.to}`);
 
           const line = L.polyline(arcBetween(from, to), {
             color: route.colour,
-            weight: 3,
-            opacity: 0.8,
+            weight: 1.8 + share * 6,
+            opacity: 0.45 + share * 0.45,
             lineCap: 'round',
-            className: 'route-leg',
+            className: isWorst ? 'route-leg route-leg-worst' : 'route-leg',
           });
           line.bindTooltip(
-            `<b>${route.name}</b><br>${route.stops[i].area} → ${route.stops[i + 1].area}<br>${route.stops[i + 1].label}`,
+            `<b>${route.name}</b><br>${leg.from} → ${leg.to}<br>` +
+              `<b>${formatDuration(leg.minutes)} driving</b><br>${leg.label}` +
+              (isWorst ? '<br><i>one of the three most expensive legs today</i>' : ''),
             { sticky: true },
           );
           line.on('mouseover', () => onHighlightTech(route.techId));
           line.on('mouseout', () => onHighlightTech(null));
-          // Stagger the draw so the fleet appears route by route.
           line.on('add', () => {
             const el = line.getElement() as SVGPathElement | null;
             if (el) el.style.animationDelay = `${ri * 70}ms`;
           });
           line.addTo(group);
-          legs.push(line);
-        }
-        routeLayers.current.set(route.techId, legs);
+          drawn.push(line);
+        });
+        routeLayers.current.set(route.techId, drawn);
       });
 
       // Areas.
@@ -210,6 +259,71 @@ export function CityMap({
         }).addTo(group);
       });
 
+      // Where everyone is, if the clock is set.
+      for (const { tech, position } of fleet) {
+        if (position.kind === 'off') continue;
+        const route = routes.find((r) => r.techId === tech.id);
+        const colour = route?.colour ?? 'oklch(0.72 0.02 250)';
+
+        let where: LatLng;
+        if (position.kind === 'at') {
+          where = point(position.area);
+        } else {
+          // Along the same arc the leg is drawn on, so the marker tracks the line.
+          const arc = arcBetween(point(position.from), point(position.to));
+          const i = Math.min(arc.length - 1, Math.max(0, Math.round(position.t * (arc.length - 1))));
+          where = { lat: arc[i][0], lng: arc[i][1] };
+        }
+
+        const driving = position.kind === 'between';
+        const working = position.kind === 'at' && position.doing === 'working';
+
+        L.circleMarker([where.lat, where.lng], {
+          radius: working ? 9 : 7,
+          color: 'oklch(0.16 0.02 250)',
+          weight: 2,
+          fillColor: colour,
+          fillOpacity: driving ? 0.75 : 1,
+          className: driving ? 'fleet-driving' : undefined,
+        })
+          .bindTooltip(position.label, { direction: 'top' })
+          .addTo(group);
+
+        L.marker([where.lat, where.lng], {
+          interactive: false,
+          icon: L.divIcon({
+            className: 'fleet-label',
+            html: `<span>${tech.name}</span>`,
+            iconSize: [0, 0],
+          }),
+        }).addTo(group);
+      }
+
+      // Why a blocked job was out of reach: who holds the skill, and how far
+      // away they were when its window opened.
+      if (blockedJob) {
+        const target = point(blockedJob.area);
+        for (const reach of reaches) {
+          const origin = point(reach.fromArea);
+          if (origin.lat === target.lat && origin.lng === target.lng) continue;
+          L.polyline(arcBetween(origin, target, 0.08), {
+            color: reach.ok ? 'oklch(0.655 0.088 158)' : 'oklch(0.665 0.196 25)',
+            weight: 2,
+            opacity: 0.85,
+            dashArray: '5 6',
+            className: 'reach-line',
+          })
+            .bindTooltip(
+              `<b>${reach.tech.name}</b><br>${reach.fromArea} → ${blockedJob.area}<br>` +
+                `${formatDuration(reach.travelMin)} away, earliest arrival ` +
+                `${formatTime(reach.earliestArrival)}<br>` +
+                (reach.ok ? 'could take it' : `<b>${reach.rule}</b>: ${reach.detail ?? ''}`),
+              { sticky: true },
+            )
+            .addTo(group);
+        }
+      }
+
       // Where the selected job is.
       const selected = selectedJobId ? plan.jobs[selectedJobId] : undefined;
       if (selected) {
@@ -235,7 +349,7 @@ export function CityMap({
     return () => {
       cancelled = true;
     };
-  }, [ready, day, plan, routes, selectedJobId, onHighlightTech]);
+  }, [ready, day, plan, routes, selectedJobId, onHighlightTech, fleet, blockedJob, reaches, worst, maxLeg]);
 
   // ---- Highlight without redrawing. ------------------------------------
   useEffect(() => {
@@ -244,7 +358,12 @@ export function CityMap({
       const active = highlightTechId === techId;
       const dimmed = highlightTechId !== null && !active;
       for (const leg of legs) {
-        leg.setStyle({ weight: active ? 6 : 3, opacity: dimmed ? 0.12 : 0.85 });
+        // Keep the thickness the leg earned; only lift or fade it.
+        const base = leg.options.weight ?? 3;
+        leg.setStyle({
+          weight: active ? base + 3 : base,
+          opacity: dimmed ? 0.1 : Math.min(1, (leg.options.opacity ?? 0.7) + (active ? 0.25 : 0)),
+        });
       }
     }
   }, [highlightTechId, ready, plan]);
@@ -259,8 +378,98 @@ export function CityMap({
         </p>
       )}
 
-      {/* Which line is whose. */}
+      {/* What the map is currently telling you. */}
+      {blockedJob && (
+        <div
+          className="shrink-0 border-t px-4 py-2"
+          style={{ borderColor: 'var(--alarm)', background: 'var(--alarm-dim)' }}
+        >
+          <p className="text-[12.5px] leading-snug text-foreground">
+            <span className="num font-semibold">{blockedJob.code}</span> could not be scheduled.{' '}
+            {describeReach(blockedJob, reaches)}
+          </p>
+          <p className="mt-0.5 text-[11.5px] text-muted-foreground">
+            Dashed lines show every technician who holds the skill and how far they were when the
+            window opened — red means the rules still refuse them.
+          </p>
+        </div>
+      )}
+
+      {/* The clock. */}
+      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-t border-hairline bg-panel px-4 py-2">
+        <button
+          type="button"
+          onClick={() => {
+            if (clock === null) setClock(dayStart);
+            setPlaying((p) => !p);
+          }}
+          className="rounded-md border border-hairline px-2.5 py-1 text-[12px] text-foreground transition-colors hover:border-ring"
+        >
+          {playing ? 'Pause' : 'Play the day'}
+        </button>
+
+        <input
+          type="range"
+          min={dayStart}
+          max={dayEnd}
+          step={5}
+          value={clock ?? dayStart}
+          onChange={(e) => {
+            setPlaying(false);
+            setClock(Number(e.target.value));
+          }}
+          aria-label="Time of day"
+          className="h-1 min-w-[10rem] flex-1 cursor-pointer accent-[var(--skill-1)]"
+        />
+
+        <span className="num w-[3.2rem] text-[13px] font-semibold text-foreground">
+          {clock === null ? '—' : formatTime(clock)}
+        </span>
+
+        {clock === null ? (
+          <span className="text-[11.5px] text-muted-foreground">
+            Whole day shown. Drag to see where everyone is at a moment.
+          </span>
+        ) : (
+          <>
+            <span className="text-[11.5px] text-muted-foreground">
+              <span className="num text-foreground">{summary.working}</span> on site ·{' '}
+              <span className="num text-foreground">{summary.driving}</span> driving ·{' '}
+              <span className="num text-foreground">{summary.waiting}</span> waiting ·{' '}
+              <span className="num">{summary.off}</span> off shift
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setPlaying(false);
+                setClock(null);
+              }}
+              className="text-[11.5px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            >
+              show whole day
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* Which line is whose, and what the driving is costing. */}
       <div className="scroll-thin max-h-[8.5rem] shrink-0 overflow-y-auto border-t border-hairline bg-panel px-4 py-2.5">
+        {worst.length > 0 && (
+          <p className="mb-2 text-[11.5px] leading-snug text-muted-foreground">
+            <span className="text-foreground">Thicker means costlier.</span> The three most
+            expensive legs today:{' '}
+            {worst.map((w, i) => (
+              <span key={`${w.route.techId}-${w.leg.from}-${w.leg.to}`}>
+                {i > 0 && ' · '}
+                <span className="text-foreground">{w.route.name}</span>{' '}
+                {w.leg.from}→{w.leg.to}{' '}
+                <span className="num" style={{ color: 'var(--alarm)' }}>
+                  {formatDuration(w.leg.minutes)}
+                </span>
+              </span>
+            ))}
+          </p>
+        )}
         <div className="flex flex-wrap gap-x-4 gap-y-1.5">
           {routes.length === 0 && (
             <p className="text-[13px] text-muted-foreground">

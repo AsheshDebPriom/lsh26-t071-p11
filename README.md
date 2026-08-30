@@ -39,13 +39,25 @@ Open the live URL and press **Build day plan**.
   with the exact rule that stopped it, a specific reason in minutes, and the
   technician who came closest. Expand any row for the verdict on **all**
   technicians, so the decision can be audited instead of trusted.
-- **The map.** Switch to the map view for the real city: OpenStreetMap tiles,
-  pan and zoom, with one route per technician drawn through their stops in
-  order and animated in as the plan lands. It answers the question a Gantt chart
-  cannot — is this technician working a neighbourhood, or crossing Dhaka twice?
+- **The map.** The real city — OpenStreetMap tiles, pan and zoom — with one
+  route per technician drawn through their stops in order. It answers three
+  things the timeline cannot:
+  - **Where the money goes.** Each leg is drawn as thick as it is expensive, and
+    the three costliest trips of the day are called out by name and minutes. The
+    objective stops being a number in the header and becomes a picture.
+  - **What is happening at 14:00.** Drag the clock, or press play, and every
+    technician appears where they actually are — on site, waiting for a window,
+    or part way along a leg — with a running count of who is working, driving,
+    waiting and off shift. This is the only view that shows technicians *passing
+    each other*, which is the failure the brief describes.
+  - **Why a job was impossible.** Select a blocked job and the map draws every
+    technician who holds the skill, where they were when the window opened, and
+    how far away that was. The blocked panel gives you the rule; this gives you
+    the distance that made the rule inevitable.
+
   Areas are sized by how much work sits in them and pulse in the alarm colour
-  when something there cannot be done. Hovering a lane on the timeline lights
-  that route, and hovering a route highlights the lane.
+  when something there cannot be done. Hovering a lane lights that route, and
+  hovering a route highlights the lane.
 - **The manual move — drag it.** Pick up any job, from a lane or from the
   blocked list, and drag it onto another technician. The moment you lift it,
   **every lane says whether it may land**: a green edge and the time the job
@@ -145,7 +157,7 @@ npm run dev     # http://localhost:3000
 ```
 
 ```bash
-npm test        # 98 tests: one per hard rule, all 25 published cases, the board markup
+npm test        # 111 tests: one per hard rule, all 25 published cases, the board markup
 npm run stats   # the better-than-random evidence table, case by case
 npm run build   # production build
 npm run lint
@@ -510,7 +522,8 @@ lib/
   cases.ts        parses the published case file into the model
   seed.ts         the crafted demo day
   geo.ts          area coordinates and leg arcs — drawing only, never arithmetic
-  routes.ts       a plan expressed as journeys, which is what the map draws
+  routes.ts       a plan expressed as journeys and legs, which is what the map draws
+  playback.ts     where each technician is at a given minute, and how far help was
   replan.ts       the bonuses: sick technician, mid-day emergency
   score.ts        the plan score used to compare a hand-edited day
   moves.ts        previewMoves — the one verdict behind the drag and the dropdown
@@ -519,7 +532,7 @@ lib/
   sharedDays.ts   publishing and fetching days via Supabase
   caseFile.ts     read, validate and write days in the published JSON format
   palette.ts      per-case skill colour assignment
-  *.test.ts       98 tests
+  *.test.ts       111 tests
 components/board/ the header, the lanes, the city map, the blocked panel,
                   the legend, the move control, the emergency form,
                   the console, the case loader

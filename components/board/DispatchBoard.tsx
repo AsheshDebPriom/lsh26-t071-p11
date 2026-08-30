@@ -732,6 +732,8 @@ export function DispatchBoard() {
                 onHighlightTech={setHighlightTechId}
                 selectedJobId={selectedJobId}
                 onSelectJob={setSelectedJobId}
+                dayStart={boardWindow.start}
+                dayEnd={boardWindow.end}
               />
             )}
           </main>
@@ -1064,6 +1066,7 @@ function EmptyState({
   // "no plan" means, and it fills the screen with the problem rather than with
   // emptiness. Cheap enough to build on every render: it only indexes the jobs.
   const preview = emptyPlanForCase(day, rules);
+  const previewWindow = caseWindow(day);
 
   return (
     <div className="grid min-h-0 flex-1 grid-cols-1 overflow-auto lg:grid-cols-[minmax(24rem,1fr)_minmax(0,1.15fr)]">
@@ -1150,6 +1153,8 @@ function EmptyState({
           onHighlightTech={() => {}}
           selectedJobId={null}
           onSelectJob={() => {}}
+          dayStart={previewWindow.start}
+          dayEnd={previewWindow.end}
         />
       </div>
     </div>

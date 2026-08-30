@@ -121,7 +121,7 @@
     }
   ],
   "verification": {
-    "tests": "npm test — 127 tests, covering one case per hard rule, all 25 published cases, route legality, timeline contiguity, blocked-list coverage, the better-than-random claim, server-rendered board markup, and all three bonus features",
+    "tests": "npm test — 128 tests, covering one case per hard rule, all 25 published cases, route legality, timeline contiguity, blocked-list coverage, the better-than-random claim, server-rendered board markup, and all three bonus features",
     "lint": "npm run lint — clean",
     "build": "npm run build — clean",
     "stats": "npm run stats — per-case optimised vs random comparison"

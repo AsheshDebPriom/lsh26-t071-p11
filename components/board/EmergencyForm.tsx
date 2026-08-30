@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 
-import { formatTime, parseHM } from '@/lib/time';
+import { formatHM, formatTime, parseHM } from '@/lib/time';
 import type { DayCase, Job } from '@/lib/types';
 import { skillLabel } from '@/lib/types';
 
@@ -27,8 +27,8 @@ export function EmergencyForm({ day, nowMinutes, onNowChange, onRaise, onCancel,
   const [area, setArea] = useState(day.areas[0]);
   const [skill, setSkill] = useState(skills[0] ?? 'ac');
   const [duration, setDuration] = useState(60);
-  const [windowStart, setWindowStart] = useState(formatTime(nowMinutes + 30));
-  const [windowEnd, setWindowEnd] = useState(formatTime(nowMinutes + 150));
+  const [windowStart, setWindowStart] = useState(formatHM(nowMinutes + 30));
+  const [windowEnd, setWindowEnd] = useState(formatHM(nowMinutes + 150));
   const [error, setError] = useState<string | null>(null);
 
   function raise() {
@@ -74,7 +74,7 @@ export function EmergencyForm({ day, nowMinutes, onNowChange, onRaise, onCancel,
           </span>
           <input
             type="time"
-            value={formatTime(nowMinutes)}
+            value={formatHM(nowMinutes)}
             onChange={(e) => {
               try {
                 onNowChange(parseHM(e.target.value));

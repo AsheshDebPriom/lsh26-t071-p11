@@ -1,4 +1,4 @@
-import { formatTime, parseHM } from './time';
+import { formatHM, parseHM } from './time';
 import type { DayCase } from './types';
 
 /**
@@ -258,8 +258,8 @@ export function toRawCase(day: DayCase): RawCase {
       id: t.id,
       name: t.name,
       skills: [...t.skills],
-      shift_start: formatTime(t.shiftStart),
-      shift_end: formatTime(t.shiftEnd),
+      shift_start: formatHM(t.shiftStart),
+      shift_end: formatHM(t.shiftEnd),
       home_area: t.homeArea,
     })),
     jobs: day.jobs.map((j) => ({
@@ -267,8 +267,8 @@ export function toRawCase(day: DayCase): RawCase {
       area: j.area,
       skill: j.skill,
       duration_minutes: j.durationMin,
-      window_start: formatTime(j.windowStart),
-      window_end: formatTime(j.windowEnd),
+      window_start: formatHM(j.windowStart),
+      window_end: formatHM(j.windowEnd),
     })),
     ...(day.manualMove
       ? { manual_move: { job_id: day.manualMove.jobId, to_technician: day.manualMove.toTechnicianId } }

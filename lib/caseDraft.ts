@@ -1,5 +1,5 @@
 import type { RawCase, RawJob, RawTechnician } from './caseFile';
-import { formatTime } from './time';
+import { formatDuration } from './time';
 
 /**
  * Editing a day as a form rather than as JSON.
@@ -228,6 +228,6 @@ export function draftSummary(draft: RawCase): string {
     `${draft.technicians.length} technician${draft.technicians.length === 1 ? '' : 's'}, ` +
     `${draft.jobs.length} job${draft.jobs.length === 1 ? '' : 's'}, ` +
     `${draft.areas.length} area${draft.areas.length === 1 ? '' : 's'}, ` +
-    `${formatTime(work)} of work`
+    `${formatDuration(work)} of work`
   );
 }

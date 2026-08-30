@@ -174,7 +174,7 @@ npm run dev     # http://localhost:3000
 ```
 
 ```bash
-npm test        # 127 tests: one per hard rule, all 25 published cases, the board markup
+npm test        # 128 tests: one per hard rule, all 25 published cases, the board markup
 npm run stats   # the better-than-random evidence table, case by case
 npm run build   # production build
 npm run lint
@@ -394,11 +394,16 @@ To set it up: run the migration in the Supabase SQL editor, then set
 
 ## The decisions that mattered
 
-**Time is an integer number of minutes from midnight, everywhere.** 540 is 09:00.
+**Time is an integer number of minutes from midnight, everywhere.** 540 is 9:00 AM.
 No `Date` object appears anywhere in scheduling, feasibility or rendering maths;
 window checks, travel addition and shift bounds are plain integer comparisons.
-Minutes become a string only inside `formatTime()`. This removes a whole
-category of timezone and DST bug and made the manual-move validation trivial.
+Minutes become a string only at the edges, and there are two edges:
+`formatTime()` for the screen, which is a twelve-hour clock, and `formatHM()`
+for machines — exported case files and `<input type="time">` both require
+twenty-four hour `HH:MM` and reject anything else. Keeping them separate is what
+lets the display be twelve-hour without corrupting a single exported file. This
+removes a whole category of timezone and DST bug and made the manual-move
+validation trivial.
 
 **One feasibility function, called by everything.** Three of the four scored
 requirements run through `checkFeasible`. The solver's accept/reject, the blocked
@@ -531,7 +536,7 @@ matters on a dense board and in a screenshot.
 ```
 lib/
   types.ts        the data model, the rule names, the rule policy
-  time.ts         formatTime / parseHM — the only place minutes become text
+  time.ts         formatTime (12-hour, for people) and formatHM (24-hour, for files)
   travel.ts       lookups against the case's authoritative travel table
   feasibility.ts  checkFeasible — the single authority on the hard rules
   plan.ts         plan construction, mutation, the timeline model, blocked-job diagnosis
@@ -550,7 +555,7 @@ lib/
   caseFile.ts     read, validate and write days in the published JSON format
   caseDraft.ts    editing a day as a form, keeping it consistent as you go
   palette.ts      per-case skill colour assignment
-  *.test.ts       127 tests
+  *.test.ts       128 tests
 components/board/ the header, the lanes, the city map, the blocked panel,
                   the legend, the move control, the emergency form,
                   the console, the case loader and builder

@@ -321,15 +321,26 @@ function JobBlock({
           `Customer promised ${formatSpan(job.windowStart, job.windowEnd)}\n` +
           `Drag to another technician, or click to inspect`
         }
-        className="flex h-full w-full cursor-grab flex-col justify-center px-2 text-left leading-none outline-none active:cursor-grabbing"
+        className="flex h-full w-full cursor-grab flex-col justify-center overflow-hidden px-1.5 text-left leading-none outline-none active:cursor-grabbing"
         style={{ color: 'oklch(0.19 0.02 250)', touchAction: 'none' }}
       >
-        <span className="num flex items-center gap-1 text-[11.5px] font-bold">
-          {job.code}
-          {started && <span title="Already under way">▶</span>}
-        </span>
-        {widthPct > 6 && (
-          <span className="mt-0.5 truncate text-[10px] font-medium opacity-80">{job.area}</span>
+        {/*
+          A short job is a narrow block, and below a certain width any text is
+          worse than none: it wraps, clips mid-word, or pushes the block out of
+          shape. So the label is dropped in steps rather than squeezed — code
+          and area, then code alone, then nothing but the colour. The full
+          detail is always in the tooltip and in the strip below the board.
+        */}
+        {widthPct > 2.2 && (
+          <span className="num block w-full truncate whitespace-nowrap text-[11.5px] font-bold">
+            {started && <span title="Already under way">▶ </span>}
+            {job.code}
+          </span>
+        )}
+        {widthPct > 6.5 && (
+          <span className="mt-0.5 block w-full truncate whitespace-nowrap text-[10px] font-medium opacity-80">
+            {job.area}
+          </span>
         )}
       </button>
     </motion.div>

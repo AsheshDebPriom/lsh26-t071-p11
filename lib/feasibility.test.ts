@@ -13,7 +13,7 @@ import {
 } from './plan';
 import { CRAFTED_DAY, CRAFTED_TRAVEL } from './seed';
 import { randomBaselineForCase, solveCase } from './solver';
-import { hm, parseHM } from './time';
+import { formatHM, formatTime, hm, parseHM } from './time';
 import { assertMatrixIsSane, travelMinutes } from './travel';
 import type { Job, Plan, RuleOptions, Technician } from './types';
 import { DEFAULT_RULES } from './types';
@@ -47,11 +47,36 @@ function planFor(tech: Technician, jobs: Job[], rules: RuleOptions = DEFAULT_RUL
   return emptyPlan([tech], jobs, CRAFTED_TRAVEL, rules);
 }
 
-test('parseHM and formatTime round-trip the published time format', () => {
+test('parseHM and formatHM round-trip the published time format', () => {
   assert.equal(parseHM('09:00'), 540);
   assert.equal(parseHM('6:05'), 365);
   assert.equal(parseHM('19:30'), 1170);
   assert.throws(() => parseHM('nine'));
+
+  // formatHM is the machine format: what goes into a case file and into the
+  // value of an <input type="time">, both of which reject anything else.
+  assert.equal(formatHM(540), '09:00');
+  assert.equal(formatHM(0), '00:00');
+  assert.equal(formatHM(1170), '19:30');
+  for (const text of ['00:00', '09:05', '13:45', '23:59']) {
+    assert.equal(formatHM(parseHM(text)), text, `${text} must survive the round trip`);
+  }
+});
+
+test('formatTime shows a twelve-hour clock, and says when it has run past midnight', () => {
+  assert.equal(formatTime(540).trim(), '9:00 AM');
+  assert.equal(formatTime(720).trim(), '12:00 PM', 'noon is 12 PM, not 0 PM');
+  assert.equal(formatTime(0).trim(), '12:00 AM', 'midnight is 12 AM');
+  assert.equal(formatTime(780).trim(), '1:00 PM');
+  assert.equal(formatTime(1170).trim(), '7:30 PM');
+  assert.equal(formatTime(1439).trim(), '11:59 PM');
+
+  // A job can run past midnight; saying "12:30 AM" alone would put it on the
+  // wrong day, so the day is named.
+  assert.match(formatTime(1470), /12:30 AM \+1d/);
+
+  // Single-digit hours are padded to a digit width so a column still aligns.
+  assert.equal(formatTime(540).length, formatTime(720).length, '9:00 AM aligns under 12:00 PM');
 });
 
 test('every travel table is symmetric and zero on the diagonal', () => {
@@ -87,8 +112,10 @@ test('WINDOW_MISSED: cannot arrive before the window closes', () => {
   assert.equal(res.ok, false);
   if (res.ok) return;
   assert.equal(res.rule, 'WINDOW_MISSED');
-  assert.match(res.detail, /Arrives 09:10/);
-  assert.match(res.detail, /window closes 09:00/);
+  // Displayed on a twelve-hour clock; single-digit hours carry a figure space
+  // so columns still line up, and \s matches it.
+  assert.match(res.detail, /Arrives\s+9:10 AM/);
+  assert.match(res.detail, /window closes\s+9:00 AM/);
   assert.match(res.detail, /10m late/);
 });
 
@@ -98,7 +125,7 @@ test('OUTSIDE_SHIFT: work would finish after the shift ends', () => {
   assert.equal(res.ok, false);
   if (res.ok) return;
   assert.equal(res.rule, 'OUTSIDE_SHIFT');
-  assert.match(res.detail, /finishing 16:30/);
+  assert.match(res.detail, /finishing\s+4:30 PM/);
   assert.match(res.detail, /30m past/);
 });
 
@@ -114,7 +141,7 @@ test('NO_RETURN_TIME: only bites when the return-home rule is switched on', () =
   assert.equal(res.ok, false);
   if (res.ok) return;
   assert.equal(res.rule, 'NO_RETURN_TIME');
-  assert.match(res.detail, /Finishes 15:00 in Uttara/);
+  assert.match(res.detail, /Finishes\s+3:00 PM in Uttara/);
   assert.match(res.detail, /home area Motijheel/);
   assert.match(res.detail, /10m past/);
 });

@@ -1,0 +1,19 @@
+# Event Start Record
+
+- **Team ID:** `LSH26-T###`
+- **Problem ID:** `P##`
+- **Repository:** `lsh26-t###-p##`
+- **Event start code:** `<START-CODE>`
+- **Repository created before release:** Yes / No
+
+## Material present before 6:00 PM
+
+List every scaffold, template, configuration, asset or file already present before the event started. Write `None` if the repository was empty.
+
+| Material | Source or original location | What was already present |
+|---|---|---|
+| None | N/A | Repository was empty |
+
+## Declaration
+
+This file was added in the first event-work commit. The team will preserve the repository history until results are announced.

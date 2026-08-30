@@ -12,8 +12,12 @@ dozen-plus technicians across thirty-plus jobs, refuses to place work that
 breaks a hard rule, and says out loud — in minutes, by name — why every job it
 could not place is impossible.
 
-It runs on the twenty-five published P11 cases from the participant pack. No
-backend, no database, no API: every plan is solved in the browser.
+It runs on the twenty-five published P11 cases from the participant pack. The
+solver, the rules and the board are entirely client-side — every plan is
+computed in your browser. Two optional services sit alongside: a Gemini
+assistant behind a single server route, and Supabase for publishing a day you
+wrote so others can open it. **Both are optional; the four scored requirements
+work with neither.**
 
 ---
 
@@ -62,8 +66,10 @@ Open the live URL and press **Build day plan**.
   board"*, *"what can't be done?"*, *"load PUB-07"*. It does the thing and tells
   you what happened, in the same sentences the board uses.
 
-  **It is a parser, not a language model, and that is on purpose** — see
-  [Why the console has no LLM](#why-the-console-has-no-llm).
+  The built-in grammar answers instantly and offline. Anything it does not
+  recognise goes to **Gemini**, which reads the same day the board is showing
+  and either answers or proposes one action — see
+  [How the assistant works](#how-the-assistant-works).
 
 ### The three bonus features
 
@@ -297,41 +303,65 @@ Every replan still routes each placement through `checkFeasible`, and the tests
 rebuild each resulting board forward from scratch to confirm every job is still
 legal where it now sits.
 
-## Why the console has no LLM
+## How the assistant works
 
-The obvious way to build "type what you want" is to send the text to a language
-model. This app cannot, and the reason is worth stating rather than hiding.
+The console answers in two layers, and which one replied is labelled on screen.
 
-The stack was fixed at the start: **every page is a client component, there is
-no server component, no API route and no backend of any kind.** The whole thing
-is a static bundle. There is nowhere to keep a secret. Calling a model from the
-browser would mean shipping an API key to every visitor — which the submission
-rules forbid outright ("No password, API key, access token, private key…"), and
-which would be a real credential leak regardless of the rules. Proxying through
-a serverless function would mean adding the backend the brief explicitly
-excluded, and the live URL still has to work for a judge with no setup and no
-account.
+**The built-in grammar goes first.** `lib/console.ts` knows the vocabulary this
+problem actually has — a dozen verbs, today's technicians, today's jobs, its
+areas and skills. It is instant, free, works offline, and is exactly right for
+the phrasings it knows. It also refuses to guess: "move J-05" with nobody named
+asks *which technician* rather than picking one.
 
-So the console parses instead. The vocabulary of this problem is small and
-closed — a dozen verbs, the technicians on today's roster, the jobs in today's
-case, its areas and its skills — and `lib/console.ts` covers it directly. What
-that buys, beyond legality:
+**Anything it does not recognise goes to Gemini**, through `app/api/chat`. The
+route sends the model a plain-English snapshot of the day — the roster, the
+routes, the blocked jobs with their rules, the travel table — and the five hard
+rules, and asks for a short answer plus optionally one command.
 
-- **It never guesses.** "move J-05" with no technician named asks which one
-  rather than picking. Two names in one sentence asks which. Nonsense is
-  reported as nonsense and nothing happens.
-- **It cannot break a rule.** Every command that changes the plan is routed to
-  the very same handler the buttons call, so it goes through `checkFeasible`
-  like everything else. The console has no back door.
-- **It is testable.** 23 tests cover the grammar, including one that pulls every
-  example out of the help text and asserts the parser actually understands it —
-  so the help can never advertise a command that does not work.
-- **It works offline and costs nothing to run.**
+Three things make that safe rather than alarming:
 
-What it gives up is real conversation: it will not answer a question outside the
-dispatch domain, and it does not remember context between commands. For a
-dispatcher's console those are acceptable trades; for a general assistant they
-would not be.
+1. **The key never reaches the browser.** `GEMINI_API_KEY` has no
+   `NEXT_PUBLIC_` prefix and is read only by the server route. This is the whole
+   reason the route exists — earlier versions of this app had no server at all,
+   and a browser-side model call would have meant shipping a credential to every
+   visitor.
+2. **The model proposes; the board decides.** It may return one command from a
+   fixed list. The browser re-checks every id against the actual day, rebuilds it
+   as a typed `Command`, and runs it through the same handlers the buttons use —
+   so it still passes `checkFeasible`. A hallucinated technician simply does not
+   become an action, and the model cannot invent or bypass a rule.
+3. **It is optional.** With no key configured the route says so and the console
+   falls back to its own grammar. The live URL never depends on a third-party
+   service being up.
+
+What it gives up: without a key it will not answer open questions, and it holds
+only the last few turns of context.
+
+## Optional services
+
+Neither is needed for the four scored requirements, and both are disabled by
+simply not setting their variables. See `.env.example`.
+
+| Service | What it adds | Without it |
+| --- | --- | --- |
+| **Gemini** | Free-form questions and instructions in the console | The built-in grammar still answers |
+| **Supabase** | Publishing a day you wrote so anyone with the live URL can open it | Your days are kept in your own browser |
+| **CARTO** | Removes the watermark from the map tiles | Tiles still load, watermarked |
+
+### Supabase
+
+One table, `shared_days`, created by `supabase/migrations/0001_shared_days.sql`.
+It holds dispatch scenarios — technicians, jobs, areas, a travel table — and no
+personal data of any kind.
+
+Row-level security grants **select and insert to anyone, and deliberately not
+update or delete**: a published day can be read and added to, but nobody holding
+only the publishable key can alter or remove someone else's. Anything read back
+goes through the same validator as a pasted file, because a row in a table is
+not more trustworthy than a text box.
+
+To set it up: run the migration in the Supabase SQL editor, then set
+`NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`.
 
 ## The decisions that mattered
 
@@ -444,10 +474,12 @@ matters on a dense board and in a screenshot.
 - **The map needs the network for its tiles.** Everything else in the app runs
   offline. Without tiles the map degrades to routes and areas on a plain
   background rather than failing.
-- **The console understands this problem only.** It is a domain parser, not a
-  general assistant: it holds no conversation state between commands and will
-  not answer anything outside dispatch. Ask it for help and it lists exactly
-  what it does know.
+- **Without a Gemini key the console understands this problem only.** The
+  built-in grammar is a domain parser: ask it something outside dispatch and it
+  says so, and lists what it does know.
+- **The assistant is not a planner.** It proposes one command at a time and the
+  board rules on it; it cannot re-solve the day itself or reason its way around
+  a hard rule, by design.
 
 ## What would come next
 
@@ -483,12 +515,17 @@ lib/
   score.ts        the plan score used to compare a hand-edited day
   moves.ts        previewMoves — the one verdict behind the drag and the dropdown
   console.ts      the command grammar: parse text, answer questions
+  snapshot.ts     the day written out for a language model to read
+  sharedDays.ts   publishing and fetching days via Supabase
   caseFile.ts     read, validate and write days in the published JSON format
   palette.ts      per-case skill colour assignment
   *.test.ts       98 tests
 components/board/ the header, the lanes, the city map, the blocked panel,
                   the legend, the move control, the emergency form,
                   the console, the case loader
+app/api/chat/     the only server route: the Gemini call, key-side
+utils/supabase/   browser and server Supabase clients
+supabase/         the one table's migration
 scripts/stats.ts  the better-than-random evidence table
 ```
 

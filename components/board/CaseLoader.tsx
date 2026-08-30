@@ -1,9 +1,16 @@
 'use client';
 
 import { AnimatePresence, motion } from 'framer-motion';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-import { blankCaseTemplate, parseCaseFile, serialiseCases, type RawCase } from '@/lib/caseFile';
+import { blankCaseTemplate, parseCaseFile, serialiseCases, toRawCase, type RawCase } from '@/lib/caseFile';
+import {
+  fetchSharedDay,
+  isSupabaseConfigured,
+  listSharedDays,
+  publishDay,
+  type SharedDay,
+} from '@/lib/sharedDays';
 import type { DayCase } from '@/lib/types';
 
 /**
@@ -32,6 +39,56 @@ export function CaseLoader({
   const [errors, setErrors] = useState<string[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
   const fileInput = useRef<HTMLInputElement | null>(null);
+
+  // Publishing is optional; the panel simply says so when it is switched off.
+  const [shared, setShared] = useState<SharedDay[] | null>(null);
+  const [shareNote, setShareNote] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!open || !isSupabaseConfigured) return;
+    let cancelled = false;
+    listSharedDays().then((r) => {
+      if (cancelled) return;
+      if (r.ok) setShared(r.value);
+      else setShareNote(r.reason);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  async function publish() {
+    setBusy(true);
+    setShareNote(null);
+    const parsed = parseCaseFile(text || serialiseCases([currentCase]));
+    if (!parsed.ok) {
+      setErrors(parsed.errors);
+      setBusy(false);
+      return;
+    }
+    const day = parsed.cases[0];
+    const result = await publishDay(day, day.case_id);
+    setShareNote(
+      result.ok
+        ? `Published as "${result.value}". Anyone opening this site can now load it.`
+        : result.reason,
+    );
+    if (result.ok) {
+      const refreshed = await listSharedDays();
+      if (refreshed.ok) setShared(refreshed.value);
+    }
+    setBusy(false);
+  }
+
+  async function openShared(id: string) {
+    setBusy(true);
+    setShareNote(null);
+    const result = await fetchSharedDay(id);
+    if (result.ok) onLoad([result.value]);
+    else setShareNote(result.reason);
+    setBusy(false);
+  }
 
   function load(source: string) {
     const result = parseCaseFile(source);
@@ -102,7 +159,7 @@ export function CaseLoader({
               </button>
               <button
                 type="button"
-                onClick={() => setText(serialiseCases([currentCase]))}
+                onClick={() => setText(JSON.stringify(toRawCase(currentCase), null, 2))}
                 className="rounded-md border border-hairline bg-panel-2 px-3 py-1.5 text-[12.5px] text-foreground hover:border-ring"
               >
                 Copy {currentCase.id} in to edit
@@ -182,6 +239,65 @@ export function CaseLoader({
                 </ul>
               </div>
             )}
+
+            <section className="mt-4 rounded-md border border-hairline bg-panel-2 px-3 py-2.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[12.5px] font-semibold text-foreground">
+                  Share a day with everyone
+                </span>
+                {!isSupabaseConfigured && (
+                  <span className="text-[11.5px] text-muted-foreground">
+                    — switched off; no Supabase project is configured, so your days stay in this
+                    browser.
+                  </span>
+                )}
+              </div>
+
+              {isSupabaseConfigured && (
+                <>
+                  <p className="mt-1 text-[11.5px] leading-snug text-muted-foreground">
+                    Publishing puts the day in a shared table so anyone opening this site can load
+                    it. Published days cannot be overwritten or deleted from here.
+                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={publish}
+                      disabled={busy}
+                      className="rounded-md border border-hairline px-3 py-1.5 text-[12.5px] text-foreground hover:border-ring disabled:opacity-50"
+                    >
+                      {busy ? 'Working…' : 'Publish the day above'}
+                    </button>
+                    {shared?.length ? (
+                      <span className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-[11.5px] text-muted-foreground">Open:</span>
+                        {shared.map((d) => (
+                          <button
+                            key={d.id}
+                            type="button"
+                            onClick={() => openShared(d.id)}
+                            disabled={busy}
+                            className="num rounded-full border border-hairline px-2 py-0.5 text-[11.5px] text-muted-foreground hover:border-ring hover:text-foreground disabled:opacity-50"
+                          >
+                            {d.title}
+                          </button>
+                        ))}
+                      </span>
+                    ) : (
+                      shared && (
+                        <span className="text-[11.5px] text-muted-foreground">
+                          Nothing published yet.
+                        </span>
+                      )
+                    )}
+                  </div>
+                </>
+              )}
+
+              {shareNote && (
+                <p className="mt-2 text-[11.5px] leading-snug text-foreground/90">{shareNote}</p>
+              )}
+            </section>
 
             <details className="mt-4 text-[12px] text-muted-foreground">
               <summary className="cursor-pointer text-foreground">What the file needs</summary>

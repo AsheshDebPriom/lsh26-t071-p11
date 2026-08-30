@@ -13,6 +13,8 @@ asset used in this repository, with its licence. Versions are the ones in
 | [react-dom](https://github.com/facebook/react) | 19.2.8 | MIT | DOM renderer; `react-dom/server` is used by the render tests. |
 | [framer-motion](https://github.com/motiondivision/motion) | 13.1.1 | MIT | Layout animation for job blocks moving between technician lanes, the map's route drawing, and the counting stat figures. |
 | [@dnd-kit/core](https://github.com/clauderic/dnd-kit) | 6.3.1 | MIT | Dragging a job from one technician's lane to another, with pointer and keyboard sensors. |
+| [@supabase/supabase-js](https://github.com/supabase/supabase-js) | 2.112.4 | MIT | Optional: publishing a day so others can open it. |
+| [@supabase/ssr](https://github.com/supabase/ssr) | 0.12.5 | MIT | Optional: the browser and server Supabase clients. |
 | [leaflet](https://github.com/Leaflet/Leaflet) | 1.9.4 | BSD-2-Clause | The map. Driven directly rather than through `react-leaflet`, which is Hippocratic-2.1 and therefore not OSI-approved open source — see the note below. |
 | [tailwindcss](https://github.com/tailwindlabs/tailwindcss) | 4.3.3 | MIT | Styling. |
 | [@tailwindcss/postcss](https://github.com/tailwindlabs/tailwindcss) | 4.3.3 | MIT | Tailwind v4 PostCSS plugin. |
@@ -67,6 +69,17 @@ The usual React wrapper for Leaflet is published under the **Hippocratic License
 Rather than put a licence in this submission that a judge would have to stop and
 think about, it was removed and Leaflet is driven directly through its own
 imperative API in `components/board/CityMap.tsx`. Leaflet itself is BSD-2-Clause.
+
+## Services used at runtime
+
+All optional. The app runs, plans and explains with none of them configured, and
+no key for any of them is committed to this repository.
+
+| Service | Used for | Terms |
+| --- | --- | --- |
+| [Google Gemini API](https://ai.google.dev/) | The console assistant, called only from `app/api/chat/route.ts`. The key is server-side and never reaches the browser. | [Gemini API terms](https://ai.google.dev/gemini-api/terms) |
+| [Supabase](https://supabase.com) | One table holding dispatch scenarios published from the board. No personal data. | [Supabase terms](https://supabase.com/terms) |
+| OpenStreetMap / CARTO tiles | The map basemap, attributed on the map. | See "Map data and tiles" above. |
 
 ## Fonts
 

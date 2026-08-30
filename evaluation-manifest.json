@@ -14,11 +14,11 @@
     "styling": "Tailwind CSS v4, shadcn/ui",
     "animation": "Framer Motion 13",
     "hosting": "Vercel",
-    "backend": "none — every page is a client component; all computation runs in the browser",
-    "database": "none",
+    "backend": "One optional server route (app/api/chat) that holds the Gemini key server-side. The solver, the rules and the board are entirely client-side; the four scored requirements work with the route absent.",
+    "database": "Optional Supabase table for publishing a day so others can open it. Not used by any scored requirement; without it, days are kept in the browser.",
     "drag_and_drop": "@dnd-kit/core 6.3.1",
     "map": "Leaflet 1.9.4 (BSD-2-Clause), OpenStreetMap tiles via CARTO, attributed on the map",
-    "assistant": "Deterministic command parser (lib/console.ts). No LLM, no API key, no network — see README, \"Why the console has no LLM\"."
+    "assistant": "Two layers: a deterministic grammar (lib/console.ts) first, then Gemini via app/api/chat for anything it does not recognise. The model may propose one command from a fixed list; the browser re-validates every id and runs it through the same handlers the buttons use, so it still passes checkFeasible."
   },
   "data_source": {
     "primary": "data/P11_route_shift_public.json",
@@ -117,7 +117,7 @@
       "feature": "A dispatcher console — type a command in plain English and the board does it",
       "status": "complete",
       "where": "lib/console.ts (grammar and answers), components/board/Console.tsx, runCommand in DispatchBoard.tsx",
-      "evidence": "Understands move, assign, unassign, sick, emergency, solve, clear, restore, load a case, switch view, toggle the return-home rule, and answers why a job is blocked, who could take it, who is busiest and the day summary. Deterministic parser, no language model and no API key — the app is a static bundle with no server to hold a secret. Every plan-changing command routes to the same handler the buttons use, so it still goes through checkFeasible. It refuses to guess: a missing or ambiguous technician is asked about, not chosen. 23 tests, including one that asserts every example in the help text actually parses."
+      "evidence": "Understands move, assign, unassign, sick, emergency, solve, clear, restore, load a case, switch view, toggle the return-home rule, and answers why a job is blocked, who could take it, who is busiest and the day summary. Anything the grammar does not recognise goes to Gemini through a server route that keeps the key out of the browser; the model may propose one command, which is re-validated against the day and run through the same handlers the buttons use. Every plan-changing path still goes through checkFeasible. 23 tests on the grammar, including one asserting every example in the help text actually parses."
     }
   ],
   "verification": {

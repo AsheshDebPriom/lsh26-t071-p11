@@ -16,7 +16,8 @@ import { useCallback, useMemo, useState } from 'react';
 
 import { caseFromRaw, CASES, DEFAULT_CASE_ID, caseWindow, findCase } from '@/lib/cases';
 import { parseCaseFile, type RawCase } from '@/lib/caseFile';
-import { answer, parseCommand } from '@/lib/console';
+import { answer, parseCommand, type Command } from '@/lib/console';
+import { describeDay, RULES_BRIEF } from '@/lib/snapshot';
 import {
   applyPlacement,
   bestPlacementOnTech,
@@ -114,6 +115,7 @@ export function DispatchBoard() {
 
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [consoleLines, setConsoleLines] = useState<ConsoleLine[]>([]);
+  const [consoleThinking, setConsoleThinking] = useState(false);
 
   const colours = useMemo(() => skillColours(day), [day]);
   const boardWindow = useMemo(() => caseWindow(day), [day]);
@@ -187,9 +189,12 @@ export function DispatchBoard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const say = useCallback((text: string, tone: ConsoleLine['tone'] = 'info') => {
-    setConsoleLines((prev) => [...prev, { id: prev.length + 1, role: 'board', text, tone }]);
-  }, []);
+  const say = useCallback(
+    (text: string, tone: ConsoleLine['tone'] = 'info', source?: ConsoleLine['source']) => {
+      setConsoleLines((prev) => [...prev, { id: prev.length + 1, role: 'board', text, tone, source }]);
+    },
+    [],
+  );
 
   const pickCase = useCallback(
     (id: string) => {
@@ -415,12 +420,9 @@ export function DispatchBoard() {
    * cannot take a shortcut past a rule; read-only questions are answered by
    * lib/console.ts from the plan as it stands.
    */
-  const runCommand = useCallback(
-    (text: string) => {
-      setConsoleLines((prev) => [...prev, { id: prev.length + 1, role: 'you', text }]);
-
+  const execute = useCallback(
+    (command: Command) => {
       const ctx = { day, plan, caseIds: allCases.map((c) => c.id) };
-      const command = parseCommand(text, ctx);
 
       const spoken = answer(command, ctx);
       if (spoken) {
@@ -534,6 +536,80 @@ export function DispatchBoard() {
       day, plan, generated, sick, say, generate, reset, restoreGenerated, pickCase,
       toggleReturnHome, move, unassign, markSick, raiseEmergency, allCases,
     ],
+  );
+
+  /**
+   * What the console does with a line of text.
+   *
+   * The local grammar goes first: it is instant, free, works offline and is
+   * exactly right for the phrasings it knows. Anything it does not understand
+   * is handed to Gemini, which reads the same day the board is showing and
+   * either answers or proposes ONE command. That command is then run through
+   * `execute` — the same path the buttons use — so the model can no more break
+   * a hard rule than the drag can. If no key is configured, or the call fails,
+   * the console says what the parser would have said and carries on.
+   */
+  const runCommand = useCallback(
+    async (text: string) => {
+      setConsoleLines((prev) => [...prev, { id: prev.length + 1, role: 'you', text }]);
+
+      const ctx = { day, plan, caseIds: allCases.map((c) => c.id) };
+      const parsed = parseCommand(text, ctx);
+      if (parsed.kind !== 'unknown') {
+        execute(parsed);
+        return;
+      }
+
+      setConsoleThinking(true);
+      try {
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: text,
+            rules: RULES_BRIEF,
+            day: describeDay(day, plan),
+            history: consoleLines.slice(-6).map((l) => ({ role: l.role, text: l.text })),
+          }),
+        });
+        const data = await res.json();
+
+        if (!res.ok || data.error) {
+          say(
+            `${data.error ?? 'The assistant is unavailable.'} Type help for what I can do without it.`,
+            'warn',
+          );
+          return;
+        }
+        if (data.configured === false) {
+          // No key on the server — say what the parser would have said.
+          const fallback = answer(parsed, ctx);
+          say(
+            `${fallback?.text ?? 'I did not understand that.'}
+(No Gemini key is configured, so I am answering from the built-in commands only.)`,
+            'warn',
+          );
+          return;
+        }
+
+        if (data.reply) say(data.reply, 'info', 'gemini');
+
+        const kind = data.command?.kind;
+        if (kind && kind !== 'none') {
+          // The model proposes; the board decides. Rebuilt as a typed command
+          // so nothing it invented can reach a handler unchecked.
+          const proposed = toCommand(data.command, ctx);
+          if (proposed) execute(proposed);
+          else say('I could not act on that against today\u2019s board.', 'warn');
+        }
+      } catch {
+        const fallback = answer(parsed, ctx);
+        say(fallback?.text ?? 'I could not reach the assistant.', 'warn');
+      } finally {
+        setConsoleThinking(false);
+      }
+    },
+    [day, plan, allCases, execute, say, consoleLines],
   );
 
   return (
@@ -686,6 +762,7 @@ export function DispatchBoard() {
         open={consoleOpen}
         onOpenChange={setConsoleOpen}
         lines={consoleLines}
+        thinking={consoleThinking}
         onSubmit={runCommand}
         caseLabel={day.label}
       />
@@ -729,6 +806,49 @@ function RosterFoot({
       </span>
     </div>
   );
+}
+
+/**
+ * Turn what the model proposed into a command this board will accept, or
+ * nothing. Ids are checked against the day rather than trusted, so a
+ * hallucinated technician or job simply does not become an action.
+ */
+function toCommand(
+  raw: Record<string, unknown>,
+  ctx: { day: DayCase; caseIds: string[] },
+): Command | null {
+  const kind = String(raw.kind);
+  const jobId = typeof raw.jobId === 'string'
+    ? ctx.day.jobs.find((j) => j.id === raw.jobId || j.code === raw.jobId)?.id
+    : undefined;
+  const techId = typeof raw.techId === 'string'
+    ? ctx.day.technicians.find((t) => t.id === raw.techId)?.id
+    : undefined;
+
+  switch (kind) {
+    case 'solve': return { kind: 'solve' };
+    case 'clear': return { kind: 'clear' };
+    case 'restore': return { kind: 'restore' };
+    case 'summary': return { kind: 'summary' };
+    case 'listBlocked': return { kind: 'listBlocked' };
+    case 'busiest': return { kind: 'busiest' };
+    case 'view':
+      return raw.view === 'map' || raw.view === 'timeline' ? { kind: 'view', view: raw.view } : null;
+    case 'setRule':
+      return typeof raw.requireReturnHome === 'boolean'
+        ? { kind: 'setRule', requireReturnHome: raw.requireReturnHome }
+        : null;
+    case 'loadCase': {
+      const id = ctx.caseIds.find((c) => c === raw.caseId);
+      return id ? { kind: 'loadCase', caseId: id } : null;
+    }
+    case 'move': return jobId && techId ? { kind: 'move', jobId, techId } : null;
+    case 'unassign': return jobId ? { kind: 'unassign', jobId } : null;
+    case 'sick': return techId ? { kind: 'sick', techId } : null;
+    case 'explain': return jobId ? { kind: 'explain', jobId } : null;
+    case 'whoCanTake': return jobId ? { kind: 'whoCanTake', jobId } : null;
+    default: return null;
+  }
 }
 
 function midday(w: { start: number; end: number }): number {

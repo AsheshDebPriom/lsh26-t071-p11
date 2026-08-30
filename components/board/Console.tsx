@@ -8,10 +8,13 @@ import { EXAMPLE_COMMANDS } from '@/lib/console';
 /**
  * The dispatcher console. Type what you want done and the board does it.
  *
- * It is a parser, not a language model — this app ships as a static bundle with
- * no server, so a model call would mean putting an API key in the browser. The
- * grammar it does know is the one this problem has: move, assign, unassign,
- * sick, emergency, explain, who can take, solve, restore, load a day.
+ * Two answering layers. The built-in grammar handles the phrasings this problem
+ * actually has — move, assign, unassign, sick, emergency, explain, who can take,
+ * solve, restore, load a day — instantly, offline and for free. Anything it does
+ * not recognise goes to Gemini through /api/chat, which reads the same day the
+ * board is showing and either answers or proposes one command. Either way the
+ * command runs through the handlers the buttons use, so nothing reaches the plan
+ * without passing checkFeasible.
  *
  * Opens with / or Ctrl-K, closes with Escape.
  */
@@ -21,17 +24,20 @@ export interface ConsoleLine {
   role: 'you' | 'board';
   text: string;
   tone?: 'ok' | 'warn' | 'info';
+  /** Set when the answer came from Gemini rather than the built-in grammar. */
+  source?: 'gemini';
 }
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   lines: ConsoleLine[];
+  thinking: boolean;
   onSubmit: (text: string) => void;
   caseLabel: string;
 }
 
-export function Console({ open, onOpenChange, lines, onSubmit, caseLabel }: Props) {
+export function Console({ open, onOpenChange, lines, thinking, onSubmit, caseLabel }: Props) {
   const [draft, setDraft] = useState('');
   const inputRef = useRef<HTMLInputElement | null>(null);
   const logRef = useRef<HTMLDivElement | null>(null);
@@ -64,7 +70,7 @@ export function Console({ open, onOpenChange, lines, onSubmit, caseLabel }: Prop
 
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: 'smooth' });
-  }, [lines]);
+  }, [lines, thinking]);
 
   function submit(text: string) {
     const trimmed = text.trim();
@@ -170,9 +176,25 @@ export function Console({ open, onOpenChange, lines, onSubmit, caseLabel }: Prop
                     }
                   >
                     {line.text}
+                    {line.source === 'gemini' && (
+                      <span className="mt-1 block text-[10.5px] uppercase tracking-wide opacity-60">
+                        via Gemini
+                      </span>
+                    )}
                   </p>
                 </motion.div>
               ))}
+
+              {thinking && (
+                <motion.p
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: [0.4, 1, 0.4] }}
+                  transition={{ duration: 1.3, repeat: Infinity }}
+                  className="text-[12.5px] text-muted-foreground"
+                >
+                  Thinking…
+                </motion.p>
+              )}
             </div>
 
             <form

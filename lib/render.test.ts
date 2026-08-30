@@ -5,17 +5,18 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { BlockedPanel } from '../components/board/BlockedPanel';
+import { CityMap } from '../components/board/CityMap';
 import { EmergencyForm } from '../components/board/EmergencyForm';
 import { Header } from '../components/board/Header';
 import { Legend } from '../components/board/Legend';
 import { MoveControl } from '../components/board/MoveControl';
 import { TechnicianLane } from '../components/board/TechnicianLane';
 import { PUBLISHED_CASES, caseWindow } from './cases';
-import { bestPlacementOnTech, findTechForJob, totalIdle, withoutJob } from './plan';
+import { bestPlacementOnTech, emptyPlanForCase, findTechForJob, totalIdle, withoutJob } from './plan';
 import { skillColours } from './palette';
 import { randomBaselineForCase, solveCase } from './solver';
 import { scorePlan } from './score';
-import { DEFAULT_RULES, RULE_LABEL, RULE_ORDER } from './types';
+import { DEFAULT_RULES, RULE_LABEL, RULE_MEANING, RULE_ORDER, skillLabel } from './types';
 
 /**
  * The board is drawn from arithmetic, not from a chart library, so the markup
@@ -40,6 +41,7 @@ function laneMarkup(techIndex: number): string {
       striped: false,
       selectedJobId: null,
       onSelectJob: noop,
+      index: 0,
     }),
   );
 }
@@ -103,12 +105,36 @@ test('the legend explains all three block types and every rule', () => {
       onMove: noop,
     }),
   );
-  for (const needle of ['Job', 'Driving', 'Idle', 'Off shift']) {
+  // The four states a lane can be in are always on screen, never behind a click.
+  for (const needle of ['Job', 'Driving', 'Waiting', 'On shift']) {
     assert.ok(html.includes(needle), `legend explains ${needle}`);
   }
-  for (const rule of RULE_ORDER) {
-    assert.ok(html.includes(RULE_LABEL[rule]), `legend explains ${rule}`);
+  // Every skill in the case gets a named colour.
+  for (const skill of new Set(day.jobs.map((j) => j.skill))) {
+    assert.ok(html.includes(skillLabel(skill)), `legend names ${skill}`);
   }
+  // The rule glossary is reference material, so it sits behind a toggle.
+  assert.match(html, /the five hard rules/);
+});
+
+test('the rules are explained where a blocked job names one', () => {
+  // The glossary moved off the legend, so the blocked panel has to carry the
+  // meaning of every rule it cites — otherwise a rule name is just jargon.
+  const html = renderToStaticMarkup(
+    createElement(BlockedPanel, {
+      plan,
+      technicians: day.technicians,
+      colours,
+      selectedJobId: null,
+      onSelectJob: noop,
+      onMove: noop,
+    }),
+  );
+  for (const b of plan.blocked) {
+    assert.ok(html.includes(RULE_LABEL[b.rule]), `panel names "${RULE_LABEL[b.rule]}"`);
+    assert.ok(html.includes(RULE_MEANING[b.rule]), `panel explains what ${b.rule} means`);
+  }
+  assert.ok(RULE_ORDER.length === 5, 'there are five hard rules');
 });
 
 test('the header states what the tool is, the goal, and where the data came from', () => {
@@ -131,6 +157,8 @@ test('the header states what the tool is, the goal, and where the data came from
       generatedScore: null,
       edited: false,
       onRestore: noop,
+      view: 'timeline' as const,
+      onView: noop,
     }),
   );
 
@@ -140,7 +168,9 @@ test('the header states what the tool is, the goal, and where the data came from
   // The goal has to be stated in words, not just implied by a figure.
   assert.match(html, /Minimising total travel time across all technicians/);
   // Provenance: the published case is named, so nothing is passed off as ours.
-  assert.match(html, /Published case PUB-01/);
+  assert.match(html, /Published case/);
+  assert.match(html, />PUB-01</);
+  assert.match(html, /participant pack/);
   // The scored numbers are labelled in plain English.
   for (const label of ['Jobs scheduled', 'Cannot be done', 'Total travel', 'Better than random']) {
     assert.ok(html.includes(label), `header labels "${label}"`);
@@ -256,4 +286,45 @@ test('the emergency form renders with a workable call already filled in', () => 
   for (const area of day.areas) assert.ok(html.includes(area), `offers ${area}`);
   // And it must say what a mid-day replan will and will not touch.
   assert.match(html, /already under way/);
+});
+
+test('the map draws one route per working technician on the schematic city', () => {
+  const html = renderToStaticMarkup(
+    createElement(CityMap, {
+      day,
+      plan,
+      highlightTechId: null,
+      onHighlightTech: noop,
+      selectedJobId: null,
+      onSelectJob: noop,
+    }),
+  );
+
+  // Every area in the case gets a node, labelled.
+  for (const area of day.areas) assert.ok(html.includes(area), `map shows ${area}`);
+
+  // One path per technician who actually has work, plus the river.
+  const working = day.technicians.filter((t) => (plan.routes[t.id] ?? []).length > 0);
+  assert.ok(working.length > 0, 'the case should have working technicians');
+  for (const tech of working) assert.ok(html.includes(tech.name), `map names ${tech.name}`);
+
+  // Routes are drawn as curves through the stops, not straight lines.
+  assert.match(html, /d="M [\d.]+ [\d.]+ Q /);
+  assert.match(html, /viewBox="0 0 760 1000"/);
+});
+
+test('the map has nothing to draw before a plan exists, and says so', () => {
+  const html = renderToStaticMarkup(
+    createElement(CityMap, {
+      day,
+      plan: emptyPlanForCase(day),
+      highlightTechId: null,
+      onHighlightTech: noop,
+      selectedJobId: null,
+      onSelectJob: noop,
+    }),
+  );
+  assert.match(html, /no routes to draw/);
+  // The areas and their job counts are still shown: that is the problem, drawn.
+  for (const area of day.areas) assert.ok(html.includes(area), `map still shows ${area}`);
 });

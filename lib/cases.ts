@@ -115,17 +115,21 @@ export function findCase(id: string): DayCase {
   return CASES.find((c) => c.id === id) ?? CASES[0];
 }
 
-/** The board window for a case: the earliest shift start to the latest end. */
+/**
+ * The board window for a case: the earliest shift start to the latest shift end.
+ *
+ * Deliberately NOT stretched to cover every customer window. A case can carry a
+ * job promised for 23:00 when nobody works past 19:00, and widening the board to
+ * fit it turns a third of the timeline into dead space that no technician could
+ * ever occupy. Such a job cannot be scheduled by definition, so it belongs in
+ * the blocked list — which names the rule — not on the ruler.
+ */
 export function caseWindow(day: DayCase): { start: number; end: number } {
   let start = Infinity;
   let end = -Infinity;
   for (const t of day.technicians) {
     start = Math.min(start, t.shiftStart);
     end = Math.max(end, t.shiftEnd);
-  }
-  for (const j of day.jobs) {
-    start = Math.min(start, j.windowStart);
-    end = Math.max(end, j.windowEnd + j.durationMin);
   }
   if (!Number.isFinite(start)) return { start: 8 * 60, end: 19 * 60 };
   // Round out to whole hours so the gridlines land on the hour.

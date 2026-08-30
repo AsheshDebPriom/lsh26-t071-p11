@@ -7,6 +7,7 @@ import { CASES, DEFAULT_CASE_ID, caseWindow, findCase } from '@/lib/cases';
 import {
   applyPlacement,
   bestPlacementOnTech,
+  emptyPlanForCase,
   findTechForJob,
   refreshPlan,
   totalIdle,
@@ -21,8 +22,9 @@ import type { DayCase, Job, Plan, RuleName, RuleOptions } from '@/lib/types';
 import { DEFAULT_RULES, skillLabel } from '@/lib/types';
 
 import { BlockedPanel } from './BlockedPanel';
+import { CityMap } from './CityMap';
 import { EmergencyForm } from './EmergencyForm';
-import { Header } from './Header';
+import { Header, type BoardView } from './Header';
 import { Legend } from './Legend';
 import { TechnicianLane } from './TechnicianLane';
 
@@ -53,6 +55,10 @@ export function DispatchBoard() {
   const [emergencyOpen, setEmergencyOpen] = useState(false);
   const [nowMinutes, setNowMinutes] = useState<number | null>(null);
 
+  const [view, setView] = useState<BoardView>('timeline');
+  // Hovering a lane lights its route on the map, and vice versa.
+  const [highlightTechId, setHighlightTechId] = useState<string | null>(null);
+
   const colours = useMemo(() => skillColours(day), [day]);
   const boardWindow = useMemo(() => caseWindow(day), [day]);
 
@@ -77,6 +83,8 @@ export function DispatchBoard() {
     setExtraJobs([]);
     setEmergencyOpen(false);
     setNowMinutes(null);
+    setHighlightTechId(null);
+    setView('timeline');
   }, []);
 
   const pickCase = useCallback(
@@ -254,6 +262,8 @@ export function DispatchBoard() {
         generatedScore={generatedScore}
         edited={edits > 0}
         onRestore={restoreGenerated}
+        view={view}
+        onView={setView}
       />
 
       <AnimatePresence mode="wait">
@@ -277,43 +287,65 @@ export function DispatchBoard() {
         <EmptyState day={day} rules={rules} solving={solving} onGenerate={generate} />
       ) : (
         <div className="flex min-h-0 flex-1">
-          <main className="scroll-thin flex min-h-0 flex-1 flex-col overflow-auto">
+          <main className="flex min-h-0 flex-1 flex-col">
             <HowToStrip
+              view={view}
               onEmergency={() => setEmergencyOpen((v) => !v)}
               emergencyOpen={emergencyOpen}
               nowMinutes={nowMinutes}
               sickCount={sick.size}
             />
-            <div className="min-w-[60rem] flex-1">
-              <HourRuler start={boardWindow.start} end={boardWindow.end} />
-              <LayoutGroup>
-                {day.technicians.map((tech, i) => (
-                  <TechnicianLane
-                    key={tech.id}
-                    tech={tech}
-                    plan={plan}
-                    dayStart={boardWindow.start}
-                    dayEnd={boardWindow.end}
-                    colours={colours}
-                    striped={i % 2 === 1}
-                    selectedJobId={selectedJobId}
-                    onSelectJob={setSelectedJobId}
-                    onCallInSick={markSick}
-                    offSick={sick.has(tech.id)}
+
+            {view === 'timeline' ? (
+              <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-auto">
+                <div className="min-w-[58rem] flex-1">
+                  <HourRuler
+                    start={boardWindow.start}
+                    end={boardWindow.end}
                     nowMinutes={nowMinutes}
                   />
-                ))}
-              </LayoutGroup>
-            </div>
-            <Legend
-              day={day}
-              colours={colours}
-              plan={plan}
-              technicians={activeTechnicians}
-              idleMin={totalIdle(plan, activeTechnicians)}
-              selectedJobId={selectedJobId}
-              onMove={move}
-            />
+                  <LayoutGroup>
+                    {day.technicians.map((tech, i) => (
+                      <TechnicianLane
+                        key={tech.id}
+                        index={i}
+                        tech={tech}
+                        plan={plan}
+                        dayStart={boardWindow.start}
+                        dayEnd={boardWindow.end}
+                        colours={colours}
+                        striped={i % 2 === 1}
+                        selectedJobId={selectedJobId}
+                        onSelectJob={setSelectedJobId}
+                        onCallInSick={markSick}
+                        offSick={sick.has(tech.id)}
+                        nowMinutes={nowMinutes}
+                        highlighted={highlightTechId === tech.id}
+                        onHighlight={setHighlightTechId}
+                      />
+                    ))}
+                  </LayoutGroup>
+                </div>
+                <Legend
+                  day={day}
+                  colours={colours}
+                  plan={plan}
+                  technicians={activeTechnicians}
+                  idleMin={totalIdle(plan, activeTechnicians)}
+                  selectedJobId={selectedJobId}
+                  onMove={move}
+                />
+              </div>
+            ) : (
+              <CityMap
+                day={day}
+                plan={plan}
+                highlightTechId={highlightTechId}
+                onHighlightTech={setHighlightTechId}
+                selectedJobId={selectedJobId}
+                onSelectJob={setSelectedJobId}
+              />
+            )}
           </main>
           <BlockedPanel
             plan={plan}
@@ -417,19 +449,29 @@ function sentence(n: Notice): string {
 
 /** The one line that tells a first-time visitor what they can do here. */
 function HowToStrip({
-  onEmergency, emergencyOpen, nowMinutes, sickCount,
+  view, onEmergency, emergencyOpen, nowMinutes, sickCount,
 }: {
+  view: BoardView;
   onEmergency: () => void;
   emergencyOpen: boolean;
   nowMinutes: number | null;
   sickCount: number;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-hairline bg-panel px-5 py-2">
+    <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-hairline bg-panel px-5 py-2">
       <p className="text-[12.5px] text-muted-foreground">
-        <span className="text-foreground">Click any job</span> to inspect it or move it to another
-        technician · <span className="text-foreground">Sick</span> takes a technician off shift and
-        redistributes their day
+        {view === 'timeline' ? (
+          <>
+            <span className="text-foreground">Click any job</span> to inspect it or move it ·{' '}
+            <span className="text-foreground">Hover a lane</span> to light its route on the map ·{' '}
+            <span className="text-foreground">Sick</span> redistributes a technician&rsquo;s day
+          </>
+        ) : (
+          <>
+            <span className="text-foreground">Each line is one technician&rsquo;s route</span> through
+            the city · hover to isolate it · a pulsing ring marks an area with work nobody can take
+          </>
+        )}
       </p>
       <div className="ml-auto flex items-center gap-3">
         {nowMinutes !== null && (
@@ -459,15 +501,21 @@ function HowToStrip({
 }
 
 /** Hour gridlines and their labels, on the same percentage scale as the lanes. */
-function HourRuler({ start, end }: { start: number; end: number }) {
+function HourRuler({
+  start, end, nowMinutes,
+}: {
+  start: number;
+  end: number;
+  nowMinutes: number | null;
+}) {
   const span = end - start;
   const hours: number[] = [];
   for (let m = start; m < end; m += 60) hours.push(m);
 
   return (
-    <div className="sticky top-0 z-10 flex border-b border-hairline bg-panel">
-      <div className="w-[16rem] shrink-0 border-r border-hairline px-3 py-2">
-        <span className="num text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">
+    <div className="sticky top-0 z-20 flex border-b border-hairline bg-panel">
+      <div className="w-[15rem] shrink-0 border-r border-hairline px-3 py-2">
+        <span className="text-[10.5px] font-medium uppercase tracking-[0.09em] text-muted-foreground">
           Technician
         </span>
       </div>
@@ -486,6 +534,19 @@ function HourRuler({ start, end }: { start: number; end: number }) {
         <span className="num absolute right-1 top-2 text-[11px] text-muted-foreground">
           {formatTime(end)}
         </span>
+        {nowMinutes !== null && nowMinutes >= start && nowMinutes <= end && (
+          <div
+            className="absolute top-0 h-full"
+            style={{ left: `${((nowMinutes - start) / span) * 100}%` }}
+          >
+            <span
+              className="num absolute -top-0.5 left-1 whitespace-nowrap rounded-sm px-1 text-[10px] font-semibold"
+              style={{ background: 'var(--alarm)', color: 'oklch(0.17 0.02 250)' }}
+            >
+              now {formatTime(nowMinutes)}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -502,46 +563,99 @@ function EmptyState({
   const jobsBySkill = new Map<string, number>();
   for (const j of day.jobs) jobsBySkill.set(j.skill, (jobsBySkill.get(j.skill) ?? 0) + 1);
   const totalWork = day.jobs.reduce((n, j) => n + j.durationMin, 0);
+  const shiftMin = day.technicians.reduce((n, t) => n + (t.shiftEnd - t.shiftStart), 0);
+
+  // The city with the work on it, but no routes yet — that is exactly what
+  // "no plan" means, and it fills the screen with the problem rather than with
+  // emptiness. Cheap enough to build on every render: it only indexes the jobs.
+  const preview = emptyPlanForCase(day, rules);
 
   return (
-    <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto px-6 py-10">
-      <div className="w-full max-w-2xl">
-        <p className="num text-[11.5px] uppercase tracking-[0.18em] text-muted-foreground">
-          {day.source === 'published' ? 'Published case' : 'Crafted case'} · {day.id} · {day.today}
-        </p>
-        <h2 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">No plan yet</h2>
-        <p className="mt-2.5 text-[14px] leading-relaxed text-muted-foreground">
-          {day.technicians.length} technicians and {day.jobs.length} jobs are loaded across{' '}
-          {day.areas.length} areas — {formatDuration(totalWork)} of work before a minute of driving,
-          and nothing assigned to anyone yet.
-        </p>
-
-        <dl className="mt-6 grid grid-cols-2 gap-x-8 gap-y-3 border-y border-hairline py-4 sm:grid-cols-4">
-          {[...jobsBySkill.entries()].sort().map(([skill, n]) => (
-            <div key={skill}>
-              <dt className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                {skillLabel(skill)}
-              </dt>
-              <dd className="num text-[20px] font-semibold text-foreground">{n}</dd>
-            </div>
-          ))}
-        </dl>
-
-        <button
-          type="button"
-          onClick={onGenerate}
-          disabled={solving}
-          className="num mt-6 rounded-[4px] bg-primary px-5 py-2.5 text-[13px] font-semibold uppercase tracking-wider text-primary-foreground hover:opacity-90 disabled:opacity-60"
+    <div className="grid min-h-0 flex-1 grid-cols-1 overflow-auto lg:grid-cols-[minmax(24rem,1fr)_minmax(0,1.15fr)]">
+      <div className="flex flex-col justify-center px-8 py-10">
+        <motion.div
+          key={day.id}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35 }}
+          className="max-w-xl"
         >
-          {solving ? 'Solving…' : 'Build the day plan'}
-        </button>
+          <span className="inline-flex items-center gap-2 rounded-full border border-hairline bg-panel px-2.5 py-1 text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
+            {day.source === 'published' ? 'Published case' : 'Crafted case'}
+            <span className="num text-foreground">{day.id}</span>
+            <span className="num opacity-70">{day.today}</span>
+          </span>
 
-        <p className="mt-4 max-w-lg text-[12.5px] leading-relaxed text-muted-foreground">
-          You will get a timeline per technician showing jobs, driving and waiting; a list of every
-          job that cannot be done with the exact rule that blocks it; and the ability to move any
-          job by hand and be told immediately if that breaks a rule. The return-to-home rule is
-          currently <span className="text-foreground">{rules.requireReturnHome ? 'on' : 'off'}</span>.
-        </p>
+          <h2 className="mt-4 text-[32px] font-semibold leading-[1.1] tracking-tight text-foreground">
+            {day.jobs.length} jobs.
+            <br />
+            {day.technicians.length} technicians.
+            <br />
+            <span className="text-muted-foreground">No plan yet.</span>
+          </h2>
+
+          <p className="mt-4 max-w-lg text-[14px] leading-relaxed text-muted-foreground">
+            {formatDuration(totalWork)} of work spread across {day.areas.length} areas of Dhaka,
+            against {formatDuration(shiftMin)} of technician time — before anyone has driven a
+            single minute. Nothing is assigned.
+          </p>
+
+          <dl className="mt-7 grid grid-cols-2 gap-x-6 gap-y-4 border-y border-hairline py-5 sm:grid-cols-4">
+            {[...jobsBySkill.entries()].sort().map(([skill, n], i) => (
+              <motion.div
+                key={skill}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.08 + i * 0.06 }}
+              >
+                <dt className="text-[11px] font-medium uppercase tracking-[0.09em] text-muted-foreground">
+                  {skillLabel(skill)}
+                </dt>
+                <dd className="num mt-1 text-[24px] font-semibold leading-none text-foreground">
+                  {n}
+                </dd>
+              </motion.div>
+            ))}
+          </dl>
+
+          <motion.button
+            type="button"
+            onClick={onGenerate}
+            disabled={solving}
+            whileTap={{ scale: 0.97 }}
+            className="mt-7 rounded-lg bg-primary px-6 py-3 text-[14px] font-semibold text-primary-foreground shadow-lg transition-opacity hover:opacity-90 disabled:opacity-60"
+          >
+            {solving ? 'Solving…' : 'Build the day plan'}
+          </motion.button>
+
+          <p className="mt-4 max-w-lg text-[12.5px] leading-relaxed text-muted-foreground">
+            You get a timeline per technician showing work, driving and waiting; every job that
+            cannot be done with the exact rule that blocks it; a map of the routes; and the ability
+            to move any job by hand and be told immediately if that breaks a rule.
+            {' '}Return-to-home is{' '}
+            <span className="text-foreground">{rules.requireReturnHome ? 'on' : 'off'}</span>.
+          </p>
+        </motion.div>
+      </div>
+
+      <div className="relative hidden min-h-0 border-l border-hairline lg:flex lg:flex-col">
+        <div className="pointer-events-none absolute left-0 right-0 top-0 z-10 px-5 pt-4">
+          <span className="text-[11px] font-medium uppercase tracking-[0.09em] text-muted-foreground">
+            Where the work is
+          </span>
+          <p className="mt-1 max-w-sm text-[12.5px] leading-snug text-muted-foreground">
+            Each circle is an area, sized by how many jobs are waiting there. Build the plan to draw
+            the routes.
+          </p>
+        </div>
+        <CityMap
+          day={day}
+          plan={preview}
+          highlightTechId={null}
+          onHighlightTech={() => {}}
+          selectedJobId={null}
+          onSelectJob={() => {}}
+        />
       </div>
     </div>
   );

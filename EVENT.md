@@ -7,6 +7,17 @@
 | Repository | `lsh26-t071-p11` |
 | Event start code | `REPLACE_WITH_EVENT_START_CODE` |
 
+## Registered members
+
+| Member | GitHub username |
+| --- | --- |
+| Md Sazzad Siddique | `MDSAZZADSIDDIQUE` |
+| Ashesh Deb Priom | `AsheshDebPriom` |
+| Rezuan Islam | `RezuanIslam` |
+
+All three usernames were checked against the GitHub API and resolve to real
+accounts. Their major contributions are recorded in `README.md`.
+
 > **Action required before submission:** replace the event start code above with the
 > code issued in the arena at 05:30 pm. Everything else in this file is final.
 

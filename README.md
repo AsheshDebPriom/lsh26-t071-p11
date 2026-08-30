@@ -457,19 +457,16 @@ three ambiguity calls.
 
 ## Team contributions
 
-> **To be completed by the team leader before submission.** Each registered
-> member needs their major contribution named here — the submission guidelines
-> require it.
+| Member | GitHub | Major contribution |
+| --- | --- | --- |
+| Md Sazzad Siddique | `MDSAZZADSIDDIQUE` | Data model and the feasibility rules — the integer-minute time model, `checkFeasible` as the single rule authority, and the unit tests behind it. Deployment and the live URL. |
+| Ashesh Deb Priom | `AsheshDebPriom` | The solver — greedy insertion, the swap and relocation improvement pass, the multi-start ordering, and the random baseline the plan is measured against. The two replan features (sick technician, mid-day emergency). |
+| Rezuan Islam | `RezuanIslam` | The board — technician lanes and the timeline geometry, the blocked-jobs panel, the city map, drag and drop, and the dispatcher console. |
 
-| Member (GitHub username) | Major contribution |
-| --- | --- |
-| _TBD_ | Data model, `checkFeasible`, unit tests |
-| _TBD_ | Solver: greedy insertion, improvement pass, random baseline |
-| _TBD_ | Board UI: timeline lanes, blocked panel, manual move |
-| _TBD_ | Case-file integration, deployment, documentation |
-
-Bonus features (sick technician, mid-day emergency, plan scoring) were built
-after all four required items were verified working.
+> Adjust the wording if it does not match how the work actually split — these
+> are the four workstreams in the repository, mapped onto three people. The
+> submission guidelines require each registered member's major contribution to
+> be named, so this table must be right before you send it.
 
 AI assistance (Anthropic Claude, via Claude Code) was used throughout and is
 disclosed in `EVENT.md`.

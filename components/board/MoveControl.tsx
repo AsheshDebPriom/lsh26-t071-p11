@@ -52,10 +52,10 @@ export function MoveControl({ job, plan, technicians, currentTechId, onMove, lab
           if (e.target.value) onMove(job.id, e.target.value);
           e.target.value = '';
         }}
-        className="num min-w-0 flex-1 truncate rounded-[3px] border border-input bg-panel-2 px-1.5 py-1 text-[11px] text-foreground outline-none focus:border-ring"
+        className="num min-w-0 flex-1 truncate rounded-[4px] border border-input bg-panel-2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-ring"
       >
         <option value="">
-          {label} ({legal} of {options.length} legal)
+          {label} — {legal} of {options.length} legal
         </option>
         {options.map((o) => (
           <option key={o.tech.id} value={o.tech.id} disabled={o.current}>

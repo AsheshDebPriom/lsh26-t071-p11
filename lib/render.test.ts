@@ -12,6 +12,7 @@ import { PUBLISHED_CASES, caseWindow } from './cases';
 import { bestPlacementOnTech, findTechForJob, totalIdle, withoutJob } from './plan';
 import { skillColours } from './palette';
 import { solveCase } from './solver';
+import { RULE_LABEL, RULE_ORDER } from './types';
 
 /**
  * The board is drawn from arithmetic, not from a chart library, so the markup
@@ -84,7 +85,7 @@ test('the blocked panel names the rule and the reason for every job', () => {
     assert.ok(html.includes(plan.jobs[b.jobId].code), `panel lists ${b.jobId}`);
     assert.ok(html.includes(b.rule), `panel names the rule for ${b.jobId}`);
   }
-  assert.match(html, /could not be assigned/);
+  assert.match(html, /Cannot be done today/);
 });
 
 test('the legend explains all three block types and every rule', () => {
@@ -98,11 +99,11 @@ test('the legend explains all three block types and every rule', () => {
       onMove: noop,
     }),
   );
-  for (const needle of ['job', 'travel gap', 'idle']) {
+  for (const needle of ['Job', 'Driving', 'Idle', 'Off shift']) {
     assert.ok(html.includes(needle), `legend explains ${needle}`);
   }
-  for (const rule of ['SKILL_MISMATCH', 'WINDOW_MISSED', 'OUTSIDE_SHIFT', 'OVERLAPS_JOB', 'NO_RETURN_TIME']) {
-    assert.ok(html.includes(rule), `legend explains ${rule}`);
+  for (const rule of RULE_ORDER) {
+    assert.ok(html.includes(RULE_LABEL[rule]), `legend explains ${rule}`);
   }
   assert.match(html, /Published case PUB-01/);
 });

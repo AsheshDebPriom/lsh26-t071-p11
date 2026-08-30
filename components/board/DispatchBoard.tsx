@@ -13,28 +13,25 @@ import {
   withoutJob,
 } from '@/lib/plan';
 import { skillColours } from '@/lib/palette';
+import { callInSick, insertEmergency } from '@/lib/replan';
+import { scorePlan } from '@/lib/score';
 import { randomBaselineForCase, solveCase, type BaselineStats, type SolveStats } from '@/lib/solver';
 import { formatDuration, formatTime } from '@/lib/time';
-import type { Plan, RuleName, RuleOptions } from '@/lib/types';
+import type { DayCase, Job, Plan, RuleName, RuleOptions } from '@/lib/types';
 import { DEFAULT_RULES, skillLabel } from '@/lib/types';
 
 import { BlockedPanel } from './BlockedPanel';
+import { EmergencyForm } from './EmergencyForm';
+import { Header } from './Header';
 import { Legend } from './Legend';
 import { TechnicianLane } from './TechnicianLane';
 
-interface Rejection {
-  jobCode: string;
-  techName: string;
-  rule: RuleName;
-  detail: string;
-}
-
-interface Applied {
-  kind: 'moved' | 'already-there';
-  jobCode: string;
-  techName: string;
-  start: number;
-}
+type Notice =
+  | { kind: 'rejected'; jobCode: string; techName: string; rule: RuleName; detail: string }
+  | { kind: 'moved'; jobCode: string; techName: string; start: number }
+  | { kind: 'already-there'; jobCode: string; techName: string; start: number }
+  | { kind: 'sick'; techName: string; rehomed: number; stranded: number }
+  | { kind: 'emergency'; jobCode: string; placed: boolean; untouched: number; stranded: number };
 
 export function DispatchBoard() {
   const [caseId, setCaseId] = useState<string>(DEFAULT_CASE_ID);
@@ -42,54 +39,92 @@ export function DispatchBoard() {
 
   const [rules, setRules] = useState<RuleOptions>(day.defaultRules ?? DEFAULT_RULES);
   const [plan, setPlan] = useState<Plan | null>(null);
+  const [generated, setGenerated] = useState<Plan | null>(null);
   const [stats, setStats] = useState<SolveStats | null>(null);
   const [baseline, setBaseline] = useState<BaselineStats | null>(null);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
-  const [rejection, setRejection] = useState<Rejection | null>(null);
-  const [applied, setApplied] = useState<Applied | null>(null);
-  const [manualMoves, setManualMoves] = useState(0);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const [edits, setEdits] = useState(0);
+  const [solving, setSolving] = useState(false);
+
+  // Bonus state.
+  const [sick, setSick] = useState<Set<string>>(() => new Set());
+  const [extraJobs, setExtraJobs] = useState<Job[]>([]);
+  const [emergencyOpen, setEmergencyOpen] = useState(false);
+  const [nowMinutes, setNowMinutes] = useState<number | null>(null);
 
   const colours = useMemo(() => skillColours(day), [day]);
-  const window = useMemo(() => caseWindow(day), [day]);
+  const boardWindow = useMemo(() => caseWindow(day), [day]);
 
-  const clearPlan = useCallback(() => {
+  const activeTechnicians = useMemo(
+    () => day.technicians.filter((t) => !sick.has(t.id)),
+    [day, sick],
+  );
+  const allJobs = useMemo(() => [...day.jobs, ...extraJobs], [day, extraJobs]);
+
+  const score = plan ? scorePlan(plan, day.technicians, allJobs.length) : null;
+  const generatedScore = generated ? scorePlan(generated, day.technicians, day.jobs.length) : null;
+
+  const reset = useCallback(() => {
     setPlan(null);
+    setGenerated(null);
     setStats(null);
     setBaseline(null);
     setSelectedJobId(null);
-    setRejection(null);
-    setApplied(null);
-    setManualMoves(0);
+    setNotice(null);
+    setEdits(0);
+    setSick(new Set());
+    setExtraJobs([]);
+    setEmergencyOpen(false);
+    setNowMinutes(null);
   }, []);
 
   const pickCase = useCallback(
     (id: string) => {
       setCaseId(id);
       setRules(findCase(id).defaultRules ?? DEFAULT_RULES);
-      clearPlan();
+      reset();
     },
-    [clearPlan],
+    [reset],
   );
 
   const toggleReturnHome = useCallback(
     (on: boolean) => {
       setRules({ requireReturnHome: on });
-      clearPlan();
+      reset();
     },
-    [clearPlan],
+    [reset],
   );
 
   const generate = useCallback(() => {
-    const outcome = solveCase(day, rules);
-    setPlan(outcome.plan);
-    setStats(outcome.stats);
-    setBaseline(randomBaselineForCase(day, rules));
-    setRejection(null);
-    setApplied(null);
-    setManualMoves(0);
+    setSolving(true);
+    // Yield a frame so the button can show "Solving…" before the work starts.
+    setTimeout(() => {
+      const outcome = solveCase(day, rules);
+      setPlan(outcome.plan);
+      setGenerated(outcome.plan);
+      setStats(outcome.stats);
+      setBaseline(randomBaselineForCase(day, rules));
+      setNotice(null);
+      setEdits(0);
+      setSick(new Set());
+      setExtraJobs([]);
+      setNowMinutes(null);
+      setSolving(false);
+    }, 0);
   }, [day, rules]);
 
-  /** The dispatcher's hand. Every move goes through checkFeasible first. */
+  const restoreGenerated = useCallback(() => {
+    if (!generated) return;
+    setPlan(generated);
+    setEdits(0);
+    setSick(new Set());
+    setExtraJobs([]);
+    setNowMinutes(null);
+    setNotice(null);
+  }, [generated]);
+
+  /** Requirement 4. Every move goes through checkFeasible before it is allowed. */
   const move = useCallback(
     (jobId: string, techId: string) => {
       if (!plan) return;
@@ -99,12 +134,9 @@ export function DispatchBoard() {
 
       const from = findTechForJob(plan, jobId);
 
-      // Moving a job to the technician who already has it is a no-op, not a
-      // rule violation. Some published cases script exactly that.
       if (from === tech.id) {
         const current = (plan.routes[tech.id] ?? []).find((a) => a.jobId === jobId);
-        setRejection(null);
-        setApplied({
+        setNotice({
           kind: 'already-there',
           jobCode: job.code,
           techName: tech.name,
@@ -118,43 +150,78 @@ export function DispatchBoard() {
       const attempt = bestPlacementOnTech(lifted, job, tech);
 
       if (!attempt.ok) {
-        setRejection({ jobCode: job.code, techName: tech.name, rule: attempt.rule, detail: attempt.detail });
-        setApplied(null);
+        setNotice({
+          kind: 'rejected',
+          jobCode: job.code,
+          techName: tech.name,
+          rule: attempt.rule,
+          detail: attempt.detail,
+        });
         setSelectedJobId(jobId);
         return;
       }
 
-      const next = refreshPlan(
-        applyPlacement(lifted, tech, job, attempt.placement.position),
-        day.technicians,
-        day.jobs,
+      setPlan(
+        refreshPlan(
+          applyPlacement(lifted, tech, job, attempt.placement.position),
+          activeTechnicians,
+          allJobs,
+        ),
       );
-      setPlan(next);
-      setRejection(null);
-      setApplied({
+      setNotice({
         kind: 'moved',
         jobCode: job.code,
         techName: tech.name,
         start: attempt.placement.result.start,
       });
       setSelectedJobId(jobId);
-      setManualMoves((n) => n + 1);
+      setEdits((n) => n + 1);
     },
-    [plan, day],
+    [plan, day, activeTechnicians, allJobs],
   );
 
-  const scriptedMove = useCallback(() => {
-    if (!plan || !day.manualMove) return;
-    move(day.manualMove.jobId, day.manualMove.toTechnicianId);
-  }, [plan, day, move]);
+  /** Bonus: a technician calls in sick and their day is redistributed. */
+  const markSick = useCallback(
+    (techId: string) => {
+      if (!plan) return;
+      const tech = day.technicians.find((t) => t.id === techId);
+      if (!tech) return;
 
-  const assigned = plan
-    ? Object.values(plan.routes).reduce((n, r) => n + r.length, 0)
-    : 0;
-  const savedPct =
-    plan && baseline && baseline.meanTravelMin > 0
-      ? Math.round(((baseline.meanTravelMin - plan.totalTravelMin) / baseline.meanTravelMin) * 100)
-      : null;
+      const outcome = callInSick(plan, day.technicians, allJobs, techId, sick, nowMinutes);
+      setSick((prev) => new Set([...prev, techId]));
+      setPlan(outcome.plan);
+      setNotice({
+        kind: 'sick',
+        techName: tech.name,
+        rehomed: outcome.rehomed.length,
+        stranded: outcome.stranded.length,
+      });
+      setEdits((n) => n + 1);
+    },
+    [plan, day, allJobs, sick, nowMinutes],
+  );
+
+  /** Bonus: an emergency arrives mid-day; only jobs not yet started are replanned. */
+  const raiseEmergency = useCallback(
+    (job: Job, at: number) => {
+      if (!plan) return;
+      const outcome = insertEmergency(plan, activeTechnicians, allJobs, job, at);
+      setExtraJobs((prev) => [...prev, job]);
+      setPlan(outcome.plan);
+      setNowMinutes(at);
+      setEmergencyOpen(false);
+      setSelectedJobId(job.id);
+      setNotice({
+        kind: 'emergency',
+        jobCode: job.code,
+        placed: outcome.placed,
+        untouched: outcome.untouched,
+        stranded: outcome.stranded.length,
+      });
+      setEdits((n) => n + 1);
+    },
+    [plan, activeTechnicians, allJobs],
+  );
 
   return (
     <div className="flex h-dvh min-h-0 flex-col bg-background">
@@ -165,96 +232,63 @@ export function DispatchBoard() {
         rules={rules}
         onToggleReturnHome={toggleReturnHome}
         onGenerate={generate}
-        onReset={clearPlan}
-        onScriptedMove={scriptedMove}
+        onReset={reset}
+        solving={solving}
         hasPlan={plan !== null}
         plan={plan}
         stats={stats}
         baseline={baseline}
-        assigned={assigned}
-        savedPct={savedPct}
-        manualMoves={manualMoves}
+        score={score}
+        generatedScore={generatedScore}
+        edited={edits > 0}
+        onRestore={restoreGenerated}
       />
 
       <AnimatePresence mode="wait">
-        {rejection && (
-          <motion.div
-            key={`rej-${rejection.jobCode}-${rejection.rule}`}
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden border-b"
-            style={{ borderColor: 'var(--alarm)', background: 'var(--alarm-dim)' }}
-          >
-            <div className="flex items-baseline gap-3 px-5 py-2.5">
-              <span
-                className="num shrink-0 rounded-[3px] px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider"
-                style={{ background: 'var(--alarm)', color: 'oklch(0.16 0.02 250)' }}
-              >
-                {rejection.rule}
-              </span>
-              <p className="text-[12.5px] leading-relaxed text-foreground">
-                <span className="num font-semibold">{rejection.jobCode}</span> cannot go to{' '}
-                <span className="font-semibold">{rejection.techName}</span>. {rejection.detail}
-              </p>
-              <button
-                type="button"
-                onClick={() => setRejection(null)}
-                className="num ml-auto shrink-0 text-[11px] uppercase tracking-wider text-foreground/70 hover:text-foreground"
-              >
-                Dismiss
-              </button>
-            </div>
-          </motion.div>
-        )}
-        {applied && !rejection && (
-          <motion.div
-            key={`ok-${applied.jobCode}-${applied.start}`}
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden border-b border-hairline bg-panel-2"
-          >
-            <div className="flex items-baseline gap-3 px-5 py-2.5">
-              <span className="num shrink-0 rounded-[3px] border border-hairline px-1.5 py-0.5 text-[11px] uppercase tracking-wider text-muted-foreground">
-                {applied.kind === 'moved' ? 'Move applied' : 'No change'}
-              </span>
-              <p className="num text-[12.5px] text-foreground">
-                {applied.kind === 'moved'
-                  ? `${applied.jobCode} → ${applied.techName}, starting ${formatTime(applied.start)}.`
-                  : `${applied.jobCode} is already on ${applied.techName}'s day, starting ${formatTime(applied.start)}.`}
-              </p>
-              <button
-                type="button"
-                onClick={() => setApplied(null)}
-                className="num ml-auto shrink-0 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
-              >
-                Dismiss
-              </button>
-            </div>
-          </motion.div>
+        {notice && (
+          <NoticeBar key={noticeKey(notice)} notice={notice} onDismiss={() => setNotice(null)} />
         )}
       </AnimatePresence>
 
+      {plan !== null && emergencyOpen && (
+        <EmergencyForm
+          day={day}
+          nowMinutes={nowMinutes ?? midday(boardWindow)}
+          onNowChange={setNowMinutes}
+          onRaise={raiseEmergency}
+          onCancel={() => setEmergencyOpen(false)}
+          index={extraJobs.length + 1}
+        />
+      )}
+
       {plan === null ? (
-        <EmptyState day={day} rules={rules} onGenerate={generate} />
+        <EmptyState day={day} rules={rules} solving={solving} onGenerate={generate} />
       ) : (
         <div className="flex min-h-0 flex-1">
           <main className="scroll-thin flex min-h-0 flex-1 flex-col overflow-auto">
-            <div className="min-w-[56rem] flex-1">
-              <HourRuler start={window.start} end={window.end} />
+            <HowToStrip
+              onEmergency={() => setEmergencyOpen((v) => !v)}
+              emergencyOpen={emergencyOpen}
+              nowMinutes={nowMinutes}
+              sickCount={sick.size}
+            />
+            <div className="min-w-[60rem] flex-1">
+              <HourRuler start={boardWindow.start} end={boardWindow.end} />
               <LayoutGroup>
                 {day.technicians.map((tech, i) => (
                   <TechnicianLane
                     key={tech.id}
                     tech={tech}
                     plan={plan}
-                    dayStart={window.start}
-                    dayEnd={window.end}
+                    dayStart={boardWindow.start}
+                    dayEnd={boardWindow.end}
                     colours={colours}
                     striped={i % 2 === 1}
                     selectedJobId={selectedJobId}
                     onSelectJob={setSelectedJobId}
+                    onCallInSick={markSick}
+                    offSick={sick.has(tech.id)}
+                    nowMinutes={nowMinutes}
                   />
                 ))}
               </LayoutGroup>
@@ -263,14 +297,14 @@ export function DispatchBoard() {
               day={day}
               colours={colours}
               plan={plan}
-              idleMin={totalIdle(plan, day.technicians)}
+              idleMin={totalIdle(plan, activeTechnicians)}
               selectedJobId={selectedJobId}
               onMove={move}
             />
           </main>
           <BlockedPanel
             plan={plan}
-            technicians={day.technicians}
+            technicians={activeTechnicians}
             colours={colours}
             selectedJobId={selectedJobId}
             onSelectJob={setSelectedJobId}
@@ -278,6 +312,135 @@ export function DispatchBoard() {
           />
         </div>
       )}
+    </div>
+  );
+}
+
+function midday(w: { start: number; end: number }): number {
+  return Math.round((w.start + w.end) / 2 / 30) * 30;
+}
+
+function noticeKey(n: Notice): string {
+  switch (n.kind) {
+    case 'rejected': return `rej-${n.jobCode}-${n.rule}`;
+    case 'moved': return `mv-${n.jobCode}-${n.start}`;
+    case 'already-there': return `same-${n.jobCode}`;
+    case 'sick': return `sick-${n.techName}-${n.rehomed}`;
+    case 'emergency': return `emg-${n.jobCode}`;
+  }
+}
+
+/** One strip, one voice: a machine stating a fact, not an apology. */
+function NoticeBar({ notice, onDismiss }: { notice: Notice; onDismiss: () => void }) {
+  const alarm = notice.kind === 'rejected';
+  return (
+    <motion.div
+      initial={{ height: 0, opacity: 0 }}
+      animate={{ height: 'auto', opacity: 1 }}
+      exit={{ height: 0, opacity: 0 }}
+      className="overflow-hidden border-b"
+      style={{
+        borderColor: alarm ? 'var(--alarm)' : 'var(--hairline)',
+        background: alarm ? 'var(--alarm-dim)' : 'var(--panel-2)',
+      }}
+    >
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-5 py-2.5">
+        <span
+          className="num shrink-0 rounded-[4px] px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider"
+          style={
+            alarm
+              ? { background: 'var(--alarm)', color: 'oklch(0.17 0.02 250)' }
+              : { border: '1px solid var(--hairline)', color: 'var(--muted-foreground)' }
+          }
+        >
+          {alarm ? notice.rule : label(notice)}
+        </span>
+        <p className="text-[13px] leading-relaxed text-foreground">{sentence(notice)}</p>
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="num ml-auto shrink-0 text-[11.5px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+        >
+          Dismiss
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
+function label(n: Notice): string {
+  switch (n.kind) {
+    case 'moved': return 'Move applied';
+    case 'already-there': return 'No change';
+    case 'sick': return 'Off sick';
+    case 'emergency': return 'Emergency';
+    default: return 'Notice';
+  }
+}
+
+function sentence(n: Notice): string {
+  switch (n.kind) {
+    case 'rejected':
+      return `${n.jobCode} cannot go to ${n.techName}. ${n.detail}`;
+    case 'moved':
+      return `${n.jobCode} moved to ${n.techName}, starting ${formatTime(n.start)}.`;
+    case 'already-there':
+      return `${n.jobCode} is already on ${n.techName}’s day, starting ${formatTime(n.start)}.`;
+    case 'sick':
+      return (
+        `${n.techName} is off shift. ${n.rehomed} job${n.rehomed === 1 ? '' : 's'} found another technician` +
+        (n.stranded > 0
+          ? `, and ${n.stranded} could not be covered — the blocked list names the rule.`
+          : ' and nothing was lost.')
+      );
+    case 'emergency':
+      return (
+        `${n.jobCode} raised. ${n.untouched} job${n.untouched === 1 ? '' : 's'} already under way were left untouched; ` +
+        (n.placed ? 'the emergency was scheduled' : 'the emergency could not be scheduled') +
+        (n.stranded > 0 ? `, and ${n.stranded} replanned job${n.stranded === 1 ? '' : 's'} no longer fit.` : '.')
+      );
+  }
+}
+
+/** The one line that tells a first-time visitor what they can do here. */
+function HowToStrip({
+  onEmergency, emergencyOpen, nowMinutes, sickCount,
+}: {
+  onEmergency: () => void;
+  emergencyOpen: boolean;
+  nowMinutes: number | null;
+  sickCount: number;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-hairline bg-panel px-5 py-2">
+      <p className="text-[12.5px] text-muted-foreground">
+        <span className="text-foreground">Click any job</span> to inspect it or move it to another
+        technician · <span className="text-foreground">Sick</span> takes a technician off shift and
+        redistributes their day
+      </p>
+      <div className="ml-auto flex items-center gap-3">
+        {nowMinutes !== null && (
+          <span className="num text-[11.5px] text-muted-foreground">
+            Clock set to <span className="text-foreground">{formatTime(nowMinutes)}</span>
+          </span>
+        )}
+        {sickCount > 0 && (
+          <span className="num text-[11.5px]" style={{ color: 'var(--alarm)' }}>
+            {sickCount} off sick
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={onEmergency}
+          className="num rounded-[4px] border px-2.5 py-1 text-[11.5px] uppercase tracking-wider"
+          style={{
+            borderColor: emergencyOpen ? 'var(--alarm)' : 'var(--hairline)',
+            color: emergencyOpen ? 'var(--alarm)' : 'var(--foreground)',
+          }}
+        >
+          {emergencyOpen ? 'Close' : 'Emergency job'}
+        </button>
+      </div>
     </div>
   );
 }
@@ -290,24 +453,24 @@ function HourRuler({ start, end }: { start: number; end: number }) {
 
   return (
     <div className="sticky top-0 z-10 flex border-b border-hairline bg-panel">
-      <div className="w-[13.5rem] shrink-0 border-r border-hairline px-3 py-1.5">
-        <span className="num text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+      <div className="w-[16rem] shrink-0 border-r border-hairline px-3 py-2">
+        <span className="num text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">
           Technician
         </span>
       </div>
-      <div className="relative h-7 flex-1 overflow-hidden">
+      <div className="relative h-8 flex-1 overflow-hidden">
         {hours.map((m) => (
           <div
             key={m}
             className="absolute top-0 h-full border-l border-hairline"
             style={{ left: `${((m - start) / span) * 100}%` }}
           >
-            <span className="num absolute left-1 top-1.5 text-[10px] text-muted-foreground">
+            <span className="num absolute left-1 top-2 text-[11px] text-muted-foreground">
               {formatTime(m)}
             </span>
           </div>
         ))}
-        <span className="num absolute right-1 top-1.5 text-[10px] text-muted-foreground">
+        <span className="num absolute right-1 top-2 text-[11px] text-muted-foreground">
           {formatTime(end)}
         </span>
       </div>
@@ -316,10 +479,11 @@ function HourRuler({ start, end }: { start: number; end: number }) {
 }
 
 function EmptyState({
-  day, rules, onGenerate,
+  day, rules, solving, onGenerate,
 }: {
-  day: ReturnType<typeof findCase>;
+  day: DayCase;
   rules: RuleOptions;
+  solving: boolean;
   onGenerate: () => void;
 }) {
   const jobsBySkill = new Map<string, number>();
@@ -327,28 +491,25 @@ function EmptyState({
   const totalWork = day.jobs.reduce((n, j) => n + j.durationMin, 0);
 
   return (
-    <div className="flex min-h-0 flex-1 items-center justify-center px-6">
-      <div className="w-full max-w-xl">
-        <p className="num text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
+    <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto px-6 py-10">
+      <div className="w-full max-w-2xl">
+        <p className="num text-[11.5px] uppercase tracking-[0.18em] text-muted-foreground">
           {day.source === 'published' ? 'Published case' : 'Crafted case'} · {day.id} · {day.today}
         </p>
-        <h2 className="mt-2 text-xl font-semibold tracking-tight text-foreground">
-          No plan generated yet
-        </h2>
-        <p className="mt-2 max-w-lg text-[13px] leading-relaxed text-muted-foreground">
+        <h2 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">No plan yet</h2>
+        <p className="mt-2.5 text-[14px] leading-relaxed text-muted-foreground">
           {day.technicians.length} technicians and {day.jobs.length} jobs are loaded across{' '}
-          {day.areas.length} areas — {formatDuration(totalWork)} of work before a minute of driving.
-          Nothing has been assigned. Build the day plan to see the timeline, the objective, and the
-          jobs the hard rules will not allow.
+          {day.areas.length} areas — {formatDuration(totalWork)} of work before a minute of driving,
+          and nothing assigned to anyone yet.
         </p>
 
-        <dl className="mt-6 grid grid-cols-2 gap-x-8 gap-y-2 border-t border-hairline pt-4 sm:grid-cols-4">
+        <dl className="mt-6 grid grid-cols-2 gap-x-8 gap-y-3 border-y border-hairline py-4 sm:grid-cols-4">
           {[...jobsBySkill.entries()].sort().map(([skill, n]) => (
             <div key={skill}>
-              <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              <dt className="text-[11px] uppercase tracking-wider text-muted-foreground">
                 {skillLabel(skill)}
               </dt>
-              <dd className="num text-[15px] text-foreground">{n}</dd>
+              <dd className="num text-[20px] font-semibold text-foreground">{n}</dd>
             </div>
           ))}
         </dl>
@@ -356,181 +517,19 @@ function EmptyState({
         <button
           type="button"
           onClick={onGenerate}
-          className="num mt-6 rounded-[3px] bg-primary px-4 py-2 text-[12px] font-semibold uppercase tracking-wider text-primary-foreground hover:opacity-90"
+          disabled={solving}
+          className="num mt-6 rounded-[4px] bg-primary px-5 py-2.5 text-[13px] font-semibold uppercase tracking-wider text-primary-foreground hover:opacity-90 disabled:opacity-60"
         >
-          Build the day plan
+          {solving ? 'Solving…' : 'Build the day plan'}
         </button>
-        <p className="mt-3 text-[11px] text-muted-foreground">
-          Return-to-home rule is {rules.requireReturnHome ? 'ON' : 'OFF'} for this case.
+
+        <p className="mt-4 max-w-lg text-[12.5px] leading-relaxed text-muted-foreground">
+          You will get a timeline per technician showing jobs, driving and waiting; a list of every
+          job that cannot be done with the exact rule that blocks it; and the ability to move any
+          job by hand and be told immediately if that breaks a rule. The return-to-home rule is
+          currently <span className="text-foreground">{rules.requireReturnHome ? 'on' : 'off'}</span>.
         </p>
       </div>
-    </div>
-  );
-}
-
-function Header(props: {
-  day: ReturnType<typeof findCase>;
-  cases: typeof CASES;
-  onPickCase: (id: string) => void;
-  rules: RuleOptions;
-  onToggleReturnHome: (on: boolean) => void;
-  onGenerate: () => void;
-  onReset: () => void;
-  onScriptedMove: () => void;
-  hasPlan: boolean;
-  plan: Plan | null;
-  stats: SolveStats | null;
-  baseline: BaselineStats | null;
-  assigned: number;
-  savedPct: number | null;
-  manualMoves: number;
-}) {
-  const {
-    day, cases, onPickCase, rules, onToggleReturnHome, onGenerate, onReset, onScriptedMove,
-    hasPlan, plan, stats, baseline, assigned, savedPct, manualMoves,
-  } = props;
-
-  return (
-    <header className="border-b border-hairline bg-panel">
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-5 py-2.5">
-        <div>
-          <h1 className="text-[14px] font-semibold tracking-tight text-foreground">
-            Dispatch Board
-          </h1>
-          <p className="num text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-            LSH26-T071 · P11 · Route &amp; shift assignment
-          </p>
-        </div>
-
-        <label className="flex items-center gap-2">
-          <span className="num text-[10px] uppercase tracking-wider text-muted-foreground">Case</span>
-          <select
-            value={day.id}
-            onChange={(e) => onPickCase(e.target.value)}
-            className="num rounded-[3px] border border-input bg-panel-2 px-2 py-1 text-[11.5px] text-foreground outline-none focus:border-ring"
-          >
-            {cases.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.label} · {c.technicians.length} tech · {c.jobs.length} jobs
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="flex items-center gap-2" title="The published format note says no return home is required, so this is off by default.">
-          <input
-            type="checkbox"
-            checked={rules.requireReturnHome}
-            onChange={(e) => onToggleReturnHome(e.target.checked)}
-            className="h-3.5 w-3.5 accent-[var(--skill-1)]"
-          />
-          <span className="num text-[10px] uppercase tracking-wider text-muted-foreground">
-            Require return home
-          </span>
-        </label>
-
-        <div className="ml-auto flex items-center gap-2">
-          {hasPlan && day.manualMove && (
-            <button
-              type="button"
-              onClick={onScriptedMove}
-              title={`Run the case's published manual_move: ${day.manualMove.jobId} to ${day.manualMove.toTechnicianId}`}
-              className="num rounded-[3px] border border-hairline bg-panel-2 px-2.5 py-1.5 text-[10.5px] uppercase tracking-wider text-foreground hover:border-ring"
-            >
-              Scripted move: {day.manualMove.jobId} → {day.manualMove.toTechnicianId}
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={hasPlan ? onReset : onGenerate}
-            className="num rounded-[3px] bg-primary px-3 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-primary-foreground hover:opacity-90"
-          >
-            {hasPlan ? 'Clear plan' : 'Build day plan'}
-          </button>
-          {hasPlan && (
-            <button
-              type="button"
-              onClick={onGenerate}
-              className="num rounded-[3px] border border-hairline bg-panel-2 px-3 py-1.5 text-[10.5px] uppercase tracking-wider text-foreground hover:border-ring"
-            >
-              Re-solve
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* The objective, stated in words, and the numbers that back it. */}
-      <div className="flex flex-wrap items-stretch gap-x-6 gap-y-2 border-t border-hairline px-5 py-2">
-        <div className="max-w-[22rem]">
-          <span className="num text-[10px] uppercase tracking-wider text-muted-foreground">
-            Objective
-          </span>
-          <p className="text-[12px] leading-snug text-foreground">
-            Minimising total travel time across all technicians.
-          </p>
-        </div>
-
-        <Stat label="Jobs placed" value={hasPlan ? `${assigned}` : '—'} sub={`of ${day.jobs.length}`} />
-        <Stat
-          label="Blocked"
-          value={hasPlan ? `${plan?.blocked.length ?? 0}` : '—'}
-          sub="rule named"
-          alarm={(plan?.blocked.length ?? 0) > 0}
-        />
-        <Stat
-          label="Total travel"
-          value={hasPlan ? `${plan?.totalTravelMin ?? 0}` : '—'}
-          sub={hasPlan ? formatDuration(plan?.totalTravelMin ?? 0) : 'min'}
-        />
-        <Stat
-          label="Random baseline"
-          value={baseline ? `${baseline.meanTravelMin}` : '—'}
-          sub={baseline ? `mean of ${baseline.runs} runs` : 'min'}
-        />
-        <Stat
-          label="Better than random"
-          value={savedPct === null ? '—' : `${savedPct}%`}
-          sub={
-            baseline && plan
-              ? `${baseline.meanTravelMin - plan.totalTravelMin} min saved`
-              : 'travel saved'
-          }
-          good={savedPct !== null && savedPct > 0}
-        />
-        {stats && (
-          <Stat
-            label="Improvement pass"
-            value={`${stats.greedyTravelMin - stats.totalTravelMin}`}
-            sub={`min off greedy · ${stats.swapsApplied} swaps, ${stats.relocationsApplied} moves`}
-          />
-        )}
-        {manualMoves > 0 && (
-          <Stat label="Manual moves" value={`${manualMoves}`} sub="applied by hand" />
-        )}
-      </div>
-    </header>
-  );
-}
-
-function Stat({
-  label, value, sub, alarm, good,
-}: {
-  label: string;
-  value: string;
-  sub: string;
-  alarm?: boolean;
-  good?: boolean;
-}) {
-  const colour = alarm ? 'var(--alarm)' : good ? 'var(--skill-2)' : 'var(--foreground)';
-  return (
-    <div className="min-w-[6.5rem]">
-      <span className="num block text-[10px] uppercase tracking-wider text-muted-foreground">
-        {label}
-      </span>
-      <span className="num text-[17px] font-semibold leading-tight" style={{ color: colour }}>
-        {value}
-      </span>
-      <span className="num ml-1 text-[10.5px] text-muted-foreground">{sub}</span>
     </div>
   );
 }

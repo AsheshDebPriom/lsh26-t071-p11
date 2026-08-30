@@ -54,34 +54,34 @@
   --radius: 0.375rem;
 
   --background: oklch(0.168 0.012 250);
-  --foreground: oklch(0.93 0.006 250);
+  --foreground: oklch(0.955 0.005 250);
 
   --panel: oklch(0.205 0.013 250);
   --panel-2: oklch(0.232 0.014 250);
   --lane: oklch(0.196 0.012 250);
   --lane-alt: oklch(0.216 0.013 250);
-  --hairline: oklch(1 0 0 / 9%);
+  --hairline: oklch(1 0 0 / 12%);
 
   --card: oklch(0.205 0.013 250);
-  --card-foreground: oklch(0.93 0.006 250);
+  --card-foreground: oklch(0.955 0.005 250);
   --popover: oklch(0.222 0.014 250);
-  --popover-foreground: oklch(0.93 0.006 250);
+  --popover-foreground: oklch(0.955 0.005 250);
 
   --primary: oklch(0.88 0.006 250);
   --primary-foreground: oklch(0.19 0.013 250);
   --secondary: oklch(0.262 0.014 250);
-  --secondary-foreground: oklch(0.93 0.006 250);
+  --secondary-foreground: oklch(0.955 0.005 250);
   --muted: oklch(0.245 0.013 250);
-  --muted-foreground: oklch(0.655 0.014 250);
+  --muted-foreground: oklch(0.735 0.013 250);
   --accent: oklch(0.268 0.015 250);
-  --accent-foreground: oklch(0.93 0.006 250);
+  --accent-foreground: oklch(0.955 0.005 250);
 
   /* The one alarm colour. Rule violations and blocked jobs only. */
   --alarm: oklch(0.665 0.196 25);
   --alarm-dim: oklch(0.665 0.196 25 / 16%);
   --destructive: oklch(0.665 0.196 25);
 
-  --border: oklch(1 0 0 / 9%);
+  --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 13%);
   --ring: oklch(0.62 0.05 250);
 
@@ -127,7 +127,17 @@
   }
   /* Idle: flat, low contrast, deliberately inert. */
   .tint-idle {
-    background-color: oklch(1 0 0 / 3.5%);
+    background-color: oklch(1 0 0 / 7%);
+  }
+  /* Off shift: outside this technician's hours. Not idle — unavailable. */
+  .tint-offshift {
+    background-image: repeating-linear-gradient(
+      90deg,
+      oklch(1 0 0 / 5%) 0px,
+      oklch(1 0 0 / 5%) 1px,
+      transparent 1px,
+      transparent 6px
+    );
   }
   .scroll-thin {
     scrollbar-width: thin;

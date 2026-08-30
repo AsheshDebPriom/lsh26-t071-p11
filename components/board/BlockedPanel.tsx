@@ -30,14 +30,14 @@ export function BlockedPanel({
   const blocked = [...plan.blocked].sort((a, b) => a.jobId.localeCompare(b.jobId));
 
   return (
-    <aside className="flex h-full min-h-0 w-[24rem] shrink-0 flex-col border-l border-hairline bg-panel">
+    <aside className="flex h-full min-h-0 w-[25rem] shrink-0 flex-col border-l border-hairline bg-panel">
       <header className="border-b border-hairline px-4 py-3">
-        <div className="flex items-baseline justify-between">
-          <h2 className="text-[13px] font-semibold tracking-wide text-foreground">
-            Jobs that could not be assigned
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-[14px] font-semibold tracking-tight text-foreground">
+            Cannot be done today
           </h2>
           <span
-            className="num rounded px-1.5 py-0.5 text-[12px] font-semibold"
+            className="num rounded-[4px] px-2 py-0.5 text-[15px] font-bold"
             style={{
               color: blocked.length ? 'var(--alarm)' : 'var(--muted-foreground)',
               background: blocked.length ? 'var(--alarm-dim)' : 'transparent',
@@ -46,14 +46,15 @@ export function BlockedPanel({
             {blocked.length}
           </span>
         </div>
-        <p className="mt-1 text-[11.5px] leading-snug text-muted-foreground">
-          Each one names the hard rule that stopped it and the technician who came closest.
+        <p className="mt-1 text-[12px] leading-snug text-muted-foreground">
+          Every job the rules would not allow, with the rule that stopped it and the technician who
+          came closest.
         </p>
       </header>
 
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         {blocked.length === 0 ? (
-          <p className="px-4 py-6 text-[12px] leading-relaxed text-muted-foreground">
+          <p className="px-4 py-8 text-[13px] leading-relaxed text-muted-foreground">
             Every job on this day is on the board. Nothing was dropped.
           </p>
         ) : (
@@ -93,44 +94,49 @@ function BlockedRow({
   if (!job) return null;
 
   const placeable = blocked.nowPlaceable;
-  const accent = placeable ? 'var(--muted-foreground)' : 'var(--alarm)';
+  const accent = placeable ? 'var(--skill-2)' : 'var(--alarm)';
 
   return (
     <li
       className={`border-b border-hairline px-4 py-3 ${selected ? 'bg-panel-2' : ''}`}
-      style={{ borderLeft: `2px solid ${accent}` }}
+      style={{ borderLeft: `3px solid ${accent}` }}
     >
       <button type="button" onClick={onSelect} className="block w-full text-left">
         <div className="flex items-center gap-2">
           <span
-            className="h-2.5 w-2.5 shrink-0 rounded-[2px]"
+            className="h-3 w-3 shrink-0 rounded-[3px]"
             style={{ background: colourFor(colours, job.skill) }}
           />
-          <span className="num text-[12.5px] font-semibold text-foreground">{job.code}</span>
-          <span className="truncate text-[11.5px] text-muted-foreground">
-            {skillLabel(job.skill)} · {job.area}
+          <span className="num text-[14px] font-bold text-foreground">{job.code}</span>
+          <span className="truncate text-[12px] text-muted-foreground">
+            {skillLabel(job.skill)} in {job.area}
           </span>
         </div>
 
-        <div className="num mt-1 text-[11px] text-muted-foreground">
-          window {formatSpan(job.windowStart, job.windowEnd)} · {formatDuration(job.durationMin)} of work
+        <div className="num mt-1 text-[12px] text-muted-foreground">
+          Customer promised {formatSpan(job.windowStart, job.windowEnd)} ·{' '}
+          {formatDuration(job.durationMin)} of work
         </div>
 
         <div
-          className="mt-2 inline-block rounded-[3px] px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-wider"
-          style={{ color: accent, background: placeable ? 'transparent' : 'var(--alarm-dim)' }}
+          className="mt-2 inline-block rounded-[4px] px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider"
+          style={{
+            color: accent,
+            background: placeable ? 'transparent' : 'var(--alarm-dim)',
+            border: placeable ? `1px solid ${accent}` : 'none',
+          }}
         >
-          {placeable ? 'Unassigned — now placeable' : blocked.rule}
+          {placeable ? 'Now placeable' : RULE_LABEL[blocked.rule]}
         </div>
 
-        <p className="mt-1.5 text-[12px] leading-relaxed text-foreground/85">
+        <p className="mt-1.5 text-[12.5px] leading-relaxed text-foreground/90">
           {placeable
-            ? `${technicians.find((t) => t.id === placeable.techId)?.name ?? placeable.techId} has room for this now — it could start ${formatTime(placeable.start)}.`
+            ? `${technicians.find((t) => t.id === placeable.techId)?.name ?? placeable.techId} has room for this now — it could start ${formatTime(placeable.start)}. Assign it below.`
             : blocked.detail}
         </p>
         {!placeable && (
-          <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
-            {RULE_LABEL[blocked.rule]} — {RULE_MEANING[blocked.rule]}
+          <p className="mt-1 text-[11.5px] leading-snug text-muted-foreground">
+            <span className="num">{blocked.rule}</span> — {RULE_MEANING[blocked.rule]}
           </p>
         )}
       </button>
@@ -147,21 +153,23 @@ function BlockedRow({
         <button
           type="button"
           onClick={() => setShowAudit((v) => !v)}
-          className="num text-[10.5px] uppercase tracking-wider text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+          className="num shrink-0 text-[11px] uppercase tracking-wider text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
         >
-          {showAudit ? 'Hide' : 'All'} {blocked.perTech.length} verdicts
+          {showAudit ? 'Hide' : 'Why all'} {blocked.perTech.length}
         </button>
       </div>
 
       {showAudit && (
-        <ul className="mt-2 space-y-1 border-t border-hairline pt-2">
+        <ul className="mt-2 space-y-1.5 border-t border-hairline pt-2">
           {blocked.perTech.map((v) => {
             const tech = technicians.find((t) => t.id === v.techId);
             return (
-              <li key={v.techId} className="text-[11px] leading-snug">
-                <span className="num text-muted-foreground">{v.techId}</span>{' '}
-                <span className="text-foreground/80">{tech?.name}</span>{' '}
-                <span className="num text-[10px] uppercase tracking-wider" style={{ color: 'var(--alarm)' }}>
+              <li key={v.techId} className="text-[11.5px] leading-snug">
+                <span className="text-foreground">{tech?.name ?? v.techId}</span>{' '}
+                <span
+                  className="num text-[10.5px] uppercase tracking-wider"
+                  style={{ color: 'var(--alarm)' }}
+                >
                   {v.rule}
                 </span>
                 <div className="text-muted-foreground">{v.detail}</div>

@@ -5,6 +5,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { BlockedPanel } from '../components/board/BlockedPanel';
+import { EmergencyForm } from '../components/board/EmergencyForm';
 import { Header } from '../components/board/Header';
 import { Legend } from '../components/board/Legend';
 import { MoveControl } from '../components/board/MoveControl';
@@ -233,4 +234,26 @@ test('every published scripted manual move gets a named verdict', () => {
     }
   }
   assert.ok(rulesSeen.size >= 2, `scripted moves should exercise several rules, saw ${[...rulesSeen].join(', ')}`);
+});
+
+test('the emergency form renders with a workable call already filled in', () => {
+  const html = renderToStaticMarkup(
+    createElement(EmergencyForm, {
+      day,
+      nowMinutes: 12 * 60,
+      onNowChange: noop,
+      onRaise: noop,
+      onCancel: noop,
+      index: 1,
+    }),
+  );
+  assert.match(html, /Raise emergency/);
+  assert.match(html, /Time now/);
+  // Prefilled so a first-time user can raise one without inventing values.
+  assert.match(html, /value="12:00"/);
+  assert.match(html, /value="12:30"/);
+  // Only areas and skills this case actually has may be offered.
+  for (const area of day.areas) assert.ok(html.includes(area), `offers ${area}`);
+  // And it must say what a mid-day replan will and will not touch.
+  assert.match(html, /already under way/);
 });

@@ -35,12 +35,13 @@ Open the live URL and press **Build day plan**.
   with the exact rule that stopped it, a specific reason in minutes, and the
   technician who came closest. Expand any row for the verdict on **all**
   technicians, so the decision can be audited instead of trusted.
-- **The map.** Switch to the map view for a schematic Dhaka with one animated
-  route per technician, drawn through their stops in order. It answers the
-  question a Gantt chart cannot — is this technician working a neighbourhood or
-  crossing the city? Areas are sized by how much work sits in them and ring in
-  the alarm colour when something there cannot be done. Hovering a lane on the
-  timeline lights that route, and hovering a route highlights the lane.
+- **The map.** Switch to the map view for the real city: OpenStreetMap tiles,
+  pan and zoom, with one route per technician drawn through their stops in
+  order and animated in as the plan lands. It answers the question a Gantt chart
+  cannot — is this technician working a neighbourhood, or crossing Dhaka twice?
+  Areas are sized by how much work sits in them and pulse in the alarm colour
+  when something there cannot be done. Hovering a lane on the timeline lights
+  that route, and hovering a route highlights the lane.
 - **The manual move — drag it.** Pick up any job, from a lane or from the
   blocked list, and drag it onto another technician. The moment you lift it,
   **every lane says whether it may land**: a green edge and the time the job
@@ -82,7 +83,7 @@ npm run dev     # http://localhost:3000
 ```
 
 ```bash
-npm test        # 43 tests: one per hard rule, all 25 published cases, the board markup
+npm test        # 53 tests: one per hard rule, all 25 published cases, the board markup
 npm run stats   # the better-than-random evidence table, case by case
 npm run build   # production build
 npm run lint
@@ -286,11 +287,13 @@ be judged against the data judges hold.
   demo day it is our own invented Dhaka matrix — symmetric, 15–70 minutes off the
   diagonal, zero on it, shaped to how the city actually moves at dispatch hours.
   There is no routing API and travel does not vary by time of day.
-- **The map is schematic, not survey data.** `lib/geo.ts` places the twelve
-  areas at roughly their real relative positions so routes read correctly by
-  eye, and draws the Buriganga for orientation. No coordinate in it is ever used
-  for arithmetic: the travel table supplied with the case remains the only
-  authority on how long a leg takes. There are no map tiles and no map library.
+- **The map's geography is real; its routes are not roads.** `lib/geo.ts` holds
+  approximate centroids for the twelve areas, and the tiles are OpenStreetMap
+  via CARTO. But a line between two areas is an arc, not a route: we have no
+  road network, and the travel table supplied with the case remains the only
+  authority on how long a leg takes. No coordinate in `lib/geo.ts` is ever used
+  for arithmetic. The tiles are the one thing in the app that needs the network;
+  if they fail, the routes and areas still draw and the map says so.
 - **The roster and the jobs.** Static case data. Nothing is fetched, stored or
   persisted; reloading the page returns to the unsolved state.
 - **Customer names on published cases.** The published file has none, so the
@@ -331,6 +334,9 @@ matters on a dense board and in a screenshot.
   scrolls horizontally below about 900px and is not designed for a phone.
 - **No persistence, no authentication, no multi-user.** Deliberate: the brief
   asked for a dispatch board, not a product.
+- **The map needs the network for its tiles.** Everything else in the app runs
+  offline. Without tiles the map degrades to routes and areas on a plain
+  background rather than failing.
 
 ## What would come next
 
@@ -340,9 +346,9 @@ matters on a dense board and in a screenshot.
 2. **Risk of missing a window as a second objective.** Every arrival's slack
    against its window close is already computed; surfacing the tightest ones
    would let a dispatcher see fragility before the day starts, not after.
-3. **Real geography on the map.** The layout is schematic; real coordinates and
-   road shapes would let it show where a route actually goes rather than the
-   order it visits areas in.
+3. **Real road geometry on the map.** The areas are in the right places now, but
+   the legs between them are arcs. Routing each leg along the actual road network
+   would show where a technician really goes, not just the order of areas.
 5. **Real travel times** by time of day, since a Dhaka afternoon is not a Dhaka
    morning, and the whole plan rests on that table.
 
@@ -360,12 +366,13 @@ lib/
   solver.ts       greedy insertion, the improvement pass, the random baseline
   cases.ts        parses the published case file into the model
   seed.ts         the crafted demo day
-  geo.ts          the schematic map layout — drawing only, never arithmetic
+  geo.ts          area coordinates and leg arcs — drawing only, never arithmetic
+  routes.ts       a plan expressed as journeys, which is what the map draws
   replan.ts       the bonuses: sick technician, mid-day emergency
   score.ts        the plan score used to compare a hand-edited day
   moves.ts        previewMoves — the one verdict behind the drag and the dropdown
   palette.ts      per-case skill colour assignment
-  *.test.ts       43 tests
+  *.test.ts       53 tests
 components/board/ the header, the lanes, the city map, the blocked panel,
                   the legend, the move control, the emergency form
 scripts/stats.ts  the better-than-random evidence table

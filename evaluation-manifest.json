@@ -16,7 +16,8 @@
     "hosting": "Vercel",
     "backend": "none — every page is a client component; all computation runs in the browser",
     "database": "none",
-    "drag_and_drop": "@dnd-kit/core 6.3.1"
+    "drag_and_drop": "@dnd-kit/core 6.3.1",
+    "map": "Leaflet 1.9.4 (BSD-2-Clause), OpenStreetMap tiles via CARTO, attributed on the map"
   },
   "data_source": {
     "primary": "data/P11_route_shift_public.json",
@@ -47,7 +48,7 @@
       "requirement": "Show the day plan as a timeline per technician with jobs, travel gaps and idle time, plus a list of jobs that could not be assigned and the exact rule that blocked each one.",
       "status": "complete",
       "where": "components/board/TechnicianLane.tsx, components/board/CityMap.tsx, components/board/BlockedPanel.tsx, components/board/Legend.tsx",
-      "evidence": "Three visually distinct block types per lane, explained in the legend. Blocked panel names the rule, the shortfall in minutes and the closest technician, and expands to the verdict for every technician. Every one of the 26 days has 2-5 blocked jobs, so the list is never empty. Tests: 'the timeline accounts for every minute of a technician shift', 'the blocked list names a rule and a human reason for every unplaced job'. A second view draws the same plan as one animated route per technician on a schematic map of Dhaka (lib/geo.ts, drawing only — the travel table stays the sole authority on distance)."
+      "evidence": "Three visually distinct block types per lane, explained in the legend. Blocked panel names the rule, the shortfall in minutes and the closest technician, and expands to the verdict for every technician. Every one of the 26 days has 2-5 blocked jobs, so the list is never empty. Tests: 'the timeline accounts for every minute of a technician shift', 'the blocked list names a rule and a human reason for every unplaced job'. A second view draws the same plan as one route per technician on a real map of Dhaka (Leaflet with OpenStreetMap tiles; lib/geo.ts holds approximate area centroids for drawing only — the travel table stays the sole authority on distance)."
     },
     {
       "id": "AT4",
@@ -113,12 +114,12 @@
     }
   ],
   "verification": {
-    "tests": "npm test — 43 tests, covering one case per hard rule, all 25 published cases, route legality, timeline contiguity, blocked-list coverage, the better-than-random claim, server-rendered board markup, and all three bonus features",
+    "tests": "npm test — 53 tests, covering one case per hard rule, all 25 published cases, route legality, timeline contiguity, blocked-list coverage, the better-than-random claim, server-rendered board markup, and all three bonus features",
     "lint": "npm run lint — clean",
     "build": "npm run build — clean",
     "stats": "npm run stats — per-case optimised vs random comparison"
   },
-  "third_party": "See LICENSES.md — complete list of dependencies, the create-next-app scaffold, shadcn/ui, fonts and event-issued data.",
+  "third_party": "See LICENSES.md — dependencies, the create-next-app scaffold, shadcn/ui, fonts, the event-issued case file, and the OpenStreetMap/CARTO map tiles loaded at runtime.",
   "ai_assistance": {
     "used": true,
     "tools": [

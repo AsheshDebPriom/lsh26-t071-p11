@@ -288,7 +288,10 @@ test('the emergency form renders with a workable call already filled in', () => 
   assert.match(html, /already under way/);
 });
 
-test('the map draws one route per working technician on the schematic city', () => {
+test('the map renders its route key on the server, before Leaflet runs', () => {
+  // The map itself is drawn imperatively by Leaflet once it reaches a browser,
+  // so server markup carries the key rather than the geometry. lib/routes.test.ts
+  // covers the model the map draws from.
   const html = renderToStaticMarkup(
     createElement(CityMap, {
       day,
@@ -299,21 +302,13 @@ test('the map draws one route per working technician on the schematic city', () 
       onSelectJob: noop,
     }),
   );
-
-  // Every area in the case gets a node, labelled.
-  for (const area of day.areas) assert.ok(html.includes(area), `map shows ${area}`);
-
-  // One path per technician who actually has work, plus the river.
   const working = day.technicians.filter((t) => (plan.routes[t.id] ?? []).length > 0);
   assert.ok(working.length > 0, 'the case should have working technicians');
-  for (const tech of working) assert.ok(html.includes(tech.name), `map names ${tech.name}`);
-
-  // Routes are drawn as curves through the stops, not straight lines.
-  assert.match(html, /d="M [\d.]+ [\d.]+ Q /);
-  assert.match(html, /viewBox="0 0 760 1000"/);
+  for (const tech of working) assert.ok(html.includes(tech.name), `key names ${tech.name}`);
+  assert.match(html, /legs/);
 });
 
-test('the map has nothing to draw before a plan exists, and says so', () => {
+test('the map key says so when there is nothing to draw', () => {
   const html = renderToStaticMarkup(
     createElement(CityMap, {
       day,
@@ -325,6 +320,4 @@ test('the map has nothing to draw before a plan exists, and says so', () => {
     }),
   );
   assert.match(html, /no routes to draw/);
-  // The areas and their job counts are still shown: that is the problem, drawn.
-  for (const area of day.areas) assert.ok(html.includes(area), `map still shows ${area}`);
 });

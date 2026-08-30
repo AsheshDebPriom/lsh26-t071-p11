@@ -54,7 +54,7 @@ those terms are displayed on the map itself.
 | Item | Source | Licence / terms |
 | --- | --- | --- |
 | Map data | [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors | Open Database License (ODbL) 1.0. Attributed on the map. |
-| Basemap tiles | [CARTO](https://carto.com/attributions) `dark_all` basemap | Free basemap service, attribution required. Attributed on the map. |
+| Basemap tiles | [CARTO](https://carto.com/attributions) `dark_all` raster basemap | Free tier, up to 5,000,000 tile requests a month, attribution required — attributed on the map, and never removed. Uses an optional account key supplied through `NEXT_PUBLIC_CARTO_KEY`; **no key is committed to this repository** and the app runs without one. Terms: [CARTO Basemaps T&Cs](https://carto.com/legal). |
 | Area coordinates | Written by us | Approximate centroids of each Dhaka area, in `lib/geo.ts`. Not derived from any licensed dataset, and never used for arithmetic — the case's travel table remains the only source of distance. |
 
 If the tile service is unreachable the map still draws the routes, the areas and

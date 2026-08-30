@@ -98,7 +98,15 @@ npm run build   # production build
 npm run lint
 ```
 
-Node 20+. No environment variables, no services, no setup of any kind.
+Node 20+, no services, no accounts. It runs with no configuration at all.
+
+One **optional** environment variable: `NEXT_PUBLIC_CARTO_KEY` removes the
+watermark CARTO puts on its free basemap tiles. Copy `.env.example` to
+`.env.local` and paste a key from
+[carto.com/basemaps/apikey](https://carto.com/basemaps/apikey). Without it the
+map still loads and works, just watermarked — so a fresh clone needs nothing.
+
+No key is committed to this repository, and none is required to run it.
 
 ---
 
@@ -379,6 +387,12 @@ matters on a dense board and in a screenshot.
   scrolls horizontally below about 900px and is not designed for a phone.
 - **No persistence, no authentication, no multi-user.** Deliberate: the brief
   asked for a dispatch board, not a product.
+- **The basemap key is public by nature.** A browser map key is sent to the tile
+  service by the visitor's own browser, so it is inlined into the client bundle
+  and cannot be hidden — that is true of every web map, not a shortcut taken
+  here. It is kept out of the repository, set in the hosting environment, and
+  should be restricted by domain in the CARTO dashboard rather than treated as a
+  secret.
 - **The map needs the network for its tiles.** Everything else in the app runs
   offline. Without tiles the map degrades to routes and areas on a plain
   background rather than failing.

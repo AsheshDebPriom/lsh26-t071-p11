@@ -26,6 +26,25 @@ import type { DayCase, Plan } from '@/lib/types';
  * shipped with the case stays the only authority on how long a leg takes.
  */
 
+/**
+ * CARTO's dark basemap.
+ *
+ * The key is read from the environment and is never committed: the submission
+ * rules forbid a key in the repository, and this is a personal key besides. Set
+ * NEXT_PUBLIC_CARTO_KEY locally in .env.local (git-ignored) and in the hosting
+ * project's environment — see .env.example.
+ *
+ * Without a key the tiles still load, watermarked, so a fresh clone works with
+ * no setup. Note that a NEXT_PUBLIC_ value is inlined into the client bundle at
+ * build time, which is inherent to a browser map key: it is sent to the tile
+ * service by the visitor's own browser, so it cannot be hidden. Restrict it by
+ * domain in the CARTO dashboard rather than relying on it being secret.
+ */
+const CARTO_KEY = process.env.NEXT_PUBLIC_CARTO_KEY;
+const TILE_URL =
+  'https://basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png' +
+  (CARTO_KEY ? `?key=${CARTO_KEY}` : '');
+
 interface Props {
   day: DayCase;
   plan: Plan;
@@ -64,10 +83,10 @@ export function CityMap({
         attributionControl: true,
       });
 
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      L.tileLayer(TILE_URL, {
+        // Required by both the OpenStreetMap licence and CARTO's free tier.
         attribution:
           '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-        subdomains: 'abcd',
         maxZoom: 19,
       })
         .on('tileerror', () => setTilesFailed(true))

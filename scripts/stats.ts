@@ -2,12 +2,12 @@
  * Evidence for the "clearly better than random" claim: runs the solver and the
  * random baseline over every case and prints the comparison. npm run stats
  */
-import { CASES, PUBLISHED_CASES } from '../lib/cases';
+import { CASES } from '../lib/cases';
 import { randomBaselineForCase, solveCase } from '../lib/solver';
 
 let sumOpt = 0, sumRand = 0, sumAssigned = 0, sumJobs = 0, sumBlocked = 0;
 for (const day of CASES) {
-  const { plan, stats } = solveCase(day);
+  const { stats } = solveCase(day);
   const base = randomBaselineForCase(day);
   sumOpt += stats.totalTravelMin; sumRand += base.meanTravelMin;
   sumAssigned += stats.assigned; sumJobs += day.jobs.length; sumBlocked += stats.blocked;

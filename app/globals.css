@@ -36,11 +36,11 @@
   --color-alarm: var(--alarm);
   --color-alarm-dim: var(--alarm-dim);
 
-  /* Skill colours */
-  --color-skill-ac-service: var(--skill-ac-service);
-  --color-skill-ac-install: var(--skill-ac-install);
-  --color-skill-plumbing: var(--skill-plumbing);
-  --color-skill-electrical: var(--skill-electrical);
+  /* Skill colours, assigned per case: a day may name any four trades. */
+  --color-skill-1: var(--skill-1);
+  --color-skill-2: var(--skill-2);
+  --color-skill-3: var(--skill-3);
+  --color-skill-4: var(--skill-4);
 
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
@@ -85,10 +85,11 @@
   --input: oklch(1 0 0 / 13%);
   --ring: oklch(0.62 0.05 250);
 
-  --skill-ac-service: oklch(0.655 0.095 205);
-  --skill-ac-install: oklch(0.625 0.105 278);
-  --skill-plumbing: oklch(0.655 0.088 158);
-  --skill-electrical: oklch(0.735 0.105 82);
+  --skill-1: oklch(0.655 0.095 205);
+  --skill-2: oklch(0.655 0.088 158);
+  --skill-3: oklch(0.625 0.105 278);
+  --skill-4: oklch(0.735 0.105 82);
+  --skill-fallback: oklch(0.62 0.02 250);
 }
 
 @layer base {

@@ -35,6 +35,12 @@ Open the live URL and press **Build day plan**.
   with the exact rule that stopped it, a specific reason in minutes, and the
   technician who came closest. Expand any row for the verdict on **all**
   technicians, so the decision can be audited instead of trusted.
+- **The map.** Switch to the map view for a schematic Dhaka with one animated
+  route per technician, drawn through their stops in order. It answers the
+  question a Gantt chart cannot — is this technician working a neighbourhood or
+  crossing the city? Areas are sized by how much work sits in them and ring in
+  the alarm colour when something there cannot be done. Hovering a lane on the
+  timeline lights that route, and hovering a route highlights the lane.
 - **The manual move.** Every job — on the board or in the blocked list — has a
   dropdown listing every technician. Each option is pre-flighted through the
   feasibility check before you open it: legal destinations show the time the job
@@ -72,7 +78,7 @@ npm run dev     # http://localhost:3000
 ```
 
 ```bash
-npm test        # 34 tests: one per hard rule, all 25 published cases, the board markup
+npm test        # 38 tests: one per hard rule, all 25 published cases, the board markup
 npm run stats   # the better-than-random evidence table, case by case
 npm run build   # production build
 npm run lint
@@ -266,7 +272,12 @@ be judged against the data judges hold.
   published cases it is the organisers' table, used unmodified. For the crafted
   demo day it is our own invented Dhaka matrix — symmetric, 15–70 minutes off the
   diagonal, zero on it, shaped to how the city actually moves at dispatch hours.
-  There is no routing API and no map; travel does not vary by time of day.
+  There is no routing API and travel does not vary by time of day.
+- **The map is schematic, not survey data.** `lib/geo.ts` places the twelve
+  areas at roughly their real relative positions so routes read correctly by
+  eye, and draws the Buriganga for orientation. No coordinate in it is ever used
+  for arithmetic: the travel table supplied with the case remains the only
+  authority on how long a leg takes. There are no map tiles and no map library.
 - **The roster and the jobs.** Static case data. Nothing is fetched, stored or
   persisted; reloading the page returns to the unsolved state.
 - **Customer names on published cases.** The published file has none, so the
@@ -274,6 +285,21 @@ be judged against the data judges hold.
   The crafted day has invented names.
 - **The clock.** Nothing reads the current time. "Now" is not a concept in the
   app, which is why the mid-day replan bonus was not attempted.
+
+### Reading the board
+
+Each technician's lane is a **shift rail** — a recessed track running from their
+shift start to their shift end — with the day laid on top of it:
+
+| | |
+| --- | --- |
+| **Job** | A raised solid chip, coloured by the skill it needs. |
+| **Driving** | A hatched bar between two jobs, the length of the travel leg. |
+| **Waiting** | A lighter fill on the rail: arrived early, window not open yet. |
+| **On shift** | The bare rail. Anything off the rail is outside their hours. |
+
+The four states are distinguishable by shape before colour is considered, which
+matters on a dense board and in a screenshot.
 
 ## Known limitations
 
@@ -301,10 +327,13 @@ be judged against the data judges hold.
 2. **Risk of missing a window as a second objective.** Every arrival's slack
    against its window close is already computed; surfacing the tightest ones
    would let a dispatcher see fragility before the day starts, not after.
-3. **Drag and drop** to replace the move dropdown. The dropdown is more
+3. **Real geography on the map.** The layout is schematic; real coordinates and
+   road shapes would let it show where a route actually goes rather than the
+   order it visits areas in.
+4. **Drag and drop** to replace the move dropdown. The dropdown is more
    informative — it pre-flights every technician and names the rule for each —
    but dragging is what a dispatcher's hand expects.
-4. **Real travel times** by time of day, since a Dhaka afternoon is not a Dhaka
+5. **Real travel times** by time of day, since a Dhaka afternoon is not a Dhaka
    morning, and the whole plan rests on that table.
 
 ---
@@ -321,12 +350,13 @@ lib/
   solver.ts       greedy insertion, the improvement pass, the random baseline
   cases.ts        parses the published case file into the model
   seed.ts         the crafted demo day
+  geo.ts          the schematic map layout — drawing only, never arithmetic
   replan.ts       the bonuses: sick technician, mid-day emergency
   score.ts        the plan score used to compare a hand-edited day
   palette.ts      per-case skill colour assignment
-  *.test.ts       34 tests
-components/board/ the header, the lanes, the blocked panel, the legend,
-                  the move control, the emergency form
+  *.test.ts       38 tests
+components/board/ the header, the lanes, the city map, the blocked panel,
+                  the legend, the move control, the emergency form
 scripts/stats.ts  the better-than-random evidence table
 ```
 

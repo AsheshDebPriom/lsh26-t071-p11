@@ -334,7 +334,7 @@ export function DispatchBoard() {
       onDragEnd={onDragEnd}
       onDragCancel={() => setDragging(null)}
     >
-    <div className="flex h-dvh min-h-0 flex-col bg-background">
+    <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-background">
       <Header
         day={day}
         cases={CASES}
@@ -387,8 +387,8 @@ export function DispatchBoard() {
             />
 
             {view === 'timeline' ? (
-              <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-auto">
-                <div className="min-w-[58rem] flex-1">
+              <div className="scroll-thin flex min-h-0 flex-1 flex-col overflow-auto bg-lane">
+                <div className="min-w-[58rem]">
                   <HourRuler
                     start={boardWindow.start}
                     end={boardWindow.end}
@@ -419,6 +419,12 @@ export function DispatchBoard() {
                       />
                     ))}
                   </LayoutGroup>
+                  <RosterFoot
+                    technicians={day.technicians.length}
+                    sick={sick.size}
+                    scheduled={score?.assigned ?? 0}
+                    jobs={allJobs.length}
+                  />
                 </div>
                 <Legend
                   day={day}
@@ -461,6 +467,38 @@ export function DispatchBoard() {
         )}
       </DragOverlay>
     </DndContext>
+  );
+}
+
+/**
+ * The end of the roster. Without it the board simply stopped, and on a screen
+ * taller than the technician list that looked like something had failed to
+ * load rather than like the day being fully drawn.
+ */
+function RosterFoot({
+  technicians, sick, scheduled, jobs,
+}: {
+  technicians: number;
+  sick: number;
+  scheduled: number;
+  jobs: number;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-hairline bg-panel px-3 py-2 text-[11.5px] text-muted-foreground">
+      <span>
+        End of roster — <span className="num text-foreground">{technicians}</span> technicians
+        {sick > 0 && (
+          <>
+            , <span className="num" style={{ color: 'var(--alarm)' }}>{sick}</span> off sick
+          </>
+        )}
+      </span>
+      <span className="opacity-50">·</span>
+      <span>
+        <span className="num text-foreground">{scheduled}</span> of{' '}
+        <span className="num">{jobs}</span> jobs on the board
+      </span>
+    </div>
   );
 }
 

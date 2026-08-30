@@ -232,7 +232,7 @@ export function CityMap({
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
-      <div ref={holder} className="min-h-0 flex-1" style={{ background: 'var(--background)' }} />
+      <div ref={holder} className="min-h-0 flex-1" style={{ background: 'var(--lane)' }} />
 
       {tilesFailed && (
         <p className="pointer-events-none absolute left-1/2 top-4 z-[500] -translate-x-1/2 rounded-md border border-hairline bg-panel px-3 py-1.5 text-[12px] text-muted-foreground">

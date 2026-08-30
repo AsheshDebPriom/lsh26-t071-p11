@@ -1,0 +1,48 @@
+LofiStack Hackathon 2026
+
+Submission guide
+Everything a team has to do, in order. The times below are read from the event clock, so this page is never out of date. If anything here disagrees with something you were sent earlier, this page and the arena are what the judges use.
+
+The clock
+05:30 pm the twelve problems, their sample data and the event start code open in the arena.
+06:00 pm building starts, and the final submission form opens.
+10:00 pm building ends. The early bonus is measured against this time.
+12:00 am the submission deadline.
+01:00 am the late window ends. After this the site closes and you must email support@lofistack.com.
+Before 06:00 pm
+The registered team leader sends the GitHub details once, in the arena. One username for each registered member, username only, with no @ and no profile URL.
+The problem set stays locked for your team until that is in, even after 05:30 pm. Send it early. Everyone must have it in by 06:00 pm.
+You may create your two repositories now. Keep them private while you work.
+They may contain generic scaffolding, as long as you declare it. A prebuilt solution to one of the problems is not allowed.
+Your two repositories
+Two problems means two repositories, one for each. Not one repository with two folders.
+Name each one lsh26-t###-p##, your team number then your problem number, all lowercase. Team LSH26-T062 solving P03 names it lsh26-t062-p03.
+Both must be public before you send the submission, and must stay public until results are announced.
+The first commit of event work in each repository adds EVENT.md containing your team ID, the problem ID, the event start code, and a declaration of anything that was already there before 06:00 pm.
+Do not squash, delete or rewrite Git history after 06:00 pm. Judges read the history.
+What each repository must contain
+Complete source code for that one problem.
+README.md with the team ID, problem ID, live URL, setup and run steps, proof that each requirement is met, the major decisions you made, and the known limitations.
+evaluation-manifest.json, completed from the template in the participant pack.
+EVENT.md with the event start code and the pre-event material declaration.
+LICENSES.md listing every framework, library, starter, template, UI kit, font, icon and asset you used.
+A short statement of how you approached the problem, and each registered member's major contribution.
+No password, API key, access token, private key or anyone's personal data.
+The manifest template is in the participant pack, which appears in the arena at 05:30 pm.
+
+Sending the submission
+Only the registered team leader sends it, and one submission covers both projects.
+The form opens in the arena at 06:00 pm and closes at 12:00 am.
+For each project you give the problem ID, the public repository URL, the exact forty character commit SHA, and the live application URL. A branch name or a short SHA is not accepted.
+You can change the submission as many times as you like before the deadline. The time we record is the time of your last change, and the latest version is the one that is judged.
+The receipt this site records is the official submission time. Nothing else counts.
+A submission after 12:00 am is still accepted until 01:00 am and is marked late for the senior judge.
+How you are scored
+Six problems are Tier 01 at 6.5 difficulty credit each, and six are Tier 02 at 7.5. Your two together are out of 15.
+Every problem lists four required items. All four are scored on each of your two problems.
+The early bonus unlocks only when at least three of the four required items fully pass on both problems, and it is measured against 10:00 pm. The earlier you send a complete submission before that time, the larger it is.
+Bonus features are only worth attempting once the four required items already work.
+Published clarifications are part of the specification, not advice. Judges mark by them, so read the ones on the problem you pick.
+Pre-event material, third party material and AI assistant use must all be disclosed in the repositories. AI assistants are allowed when disclosed; the work remains yours.
+If something goes wrong
+Ask in the Discord support channel first, and ask there rather than by direct message so that an admin sees it. If the site itself is the problem after 01:00 am, email support@lofistack.com with your team name.

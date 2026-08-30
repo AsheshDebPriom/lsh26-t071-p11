@@ -1,0 +1,24 @@
+Route and Shift Assignment Optimiser
+Background
+A home service company doing AC servicing and plumbing sends 12 technicians across Dhaka every day. Jobs have a time window the customer was promised, a skill they need, and a location.
+
+Problem statement
+The dispatcher assigns everything by hand each morning. The result is technicians crossing the city past each other while customers wait outside their promised window. The company needs a tool that builds the day plan, respects the rules that cannot be broken, and says clearly when a job cannot be done at all.
+
+Expected solution
+
+All four are scored. Three of four on both problems unlocks the early bonus.
+
+Create at least 12 technicians with skills, shift start and end times, and a home area. Create at least 30 jobs with an area, a required skill, a duration and a customer time window.
+Build an assignment method that respects the hard rules: the right skill, inside shift hours, and inside the customer time window including travel time from an area to area travel time table. Then improve one stated goal, such as total travel time or the risk of missing a window.
+Show the day plan as a timeline per technician with jobs, travel gaps and idle time, plus a list of jobs that could not be assigned and the exact rule that blocked each one.
+Let the dispatcher move a job to another technician by hand and immediately show whether that move breaks a hard rule, naming the rule.
+Bonus features
+Only attempt these if the four required items already work.
+
+Add an emergency job in the middle of the day and replan only the jobs not yet started.
+Add a technician calls in sick action that redistributes their remaining jobs.
+Show a score for the plan and let the user compare a manual plan against the generated one.
+Constraints
+The unassigned jobs list with a reason for each one is required. Silence is not an answer.
+The plan does not have to be perfect, but it must be clearly better than random and you must state the goal it is improving.

@@ -5,13 +5,16 @@ import type {
   Area,
   Assignment,
   BlockedJob,
+  DayCase,
   FeasibilityResult,
   Job,
   Plan,
   RuleName,
+  RuleOptions,
   Technician,
+  TravelMatrix,
 } from './types';
-import { SKILL_LABEL } from './types';
+import { DEFAULT_RULES, skillLabel } from './types';
 
 /** Plan construction, mutation and diagnosis. All rules come from checkFeasible. */
 
@@ -21,10 +24,20 @@ export function indexJobs(jobs: Job[]): Record<string, Job> {
   return out;
 }
 
-export function emptyPlan(technicians: Technician[], jobs: Job[]): Plan {
+export function emptyPlan(
+  technicians: Technician[],
+  jobs: Job[],
+  travel: TravelMatrix,
+  rules: RuleOptions = DEFAULT_RULES,
+): Plan {
   const routes: Record<string, Assignment[]> = {};
   for (const t of technicians) routes[t.id] = [];
-  return { routes, jobs: indexJobs(jobs), blocked: [], totalTravelMin: 0 };
+  return { routes, jobs: indexJobs(jobs), travel, rules, blocked: [], totalTravelMin: 0 };
+}
+
+/** An empty plan for a whole case, using the rule policy the case declares. */
+export function emptyPlanForCase(day: DayCase, rules?: RuleOptions): Plan {
+  return emptyPlan(day.technicians, day.jobs, day.travel, rules ?? day.defaultRules ?? DEFAULT_RULES);
 }
 
 /** Job ids on a technician's day, in route order. */
@@ -50,14 +63,19 @@ export function findTechForJob(plan: Plan, jobId: string): string | null {
  * earliest legal start for each. Pure forward pass — it does not validate,
  * because every order handed to it has already been cleared by checkFeasible.
  */
-export function recomputeRoute(tech: Technician, jobIds: string[], jobs: Record<string, Job>): Assignment[] {
+export function recomputeRoute(
+  tech: Technician,
+  jobIds: string[],
+  jobs: Record<string, Job>,
+  travel: TravelMatrix,
+): Assignment[] {
   const out: Assignment[] = [];
   let area = tech.homeArea;
   let departure = tech.shiftStart;
   for (const jobId of jobIds) {
     const job = jobs[jobId];
     if (!job) continue;
-    const travelMin = travelMinutes(area, job.area);
+    const travelMin = travelMinutes(travel, area, job.area);
     const arrival = departure + travelMin;
     const start = Math.max(arrival, job.windowStart);
     const finish = start + job.durationMin;
@@ -68,20 +86,26 @@ export function recomputeRoute(tech: Technician, jobIds: string[], jobs: Record<
   return out;
 }
 
-/** Travel minutes for one technician's day, including the leg back home. */
-export function routeTravel(tech: Technician, route: Assignment[], jobs: Record<string, Job>): number {
+/**
+ * Travel minutes for one technician's day. The leg home counts only when the
+ * return-home rule is in force, so the objective always measures exactly the
+ * driving the rules require.
+ */
+export function routeTravel(tech: Technician, route: Assignment[], plan: Plan): number {
   if (route.length === 0) return 0;
   let total = 0;
   for (const a of route) total += a.travelMin;
-  const lastJob = jobs[route[route.length - 1].jobId];
-  if (lastJob) total += travelMinutes(lastJob.area, tech.homeArea);
+  if (plan.rules.requireReturnHome) {
+    const lastJob = plan.jobs[route[route.length - 1].jobId];
+    if (lastJob) total += travelMinutes(plan.travel, lastJob.area, tech.homeArea);
+  }
   return total;
 }
 
 /** The objective: total travel minutes across every technician. Lower is better. */
 export function totalTravel(plan: Plan, technicians: Technician[]): number {
   let total = 0;
-  for (const t of technicians) total += routeTravel(t, plan.routes[t.id] ?? [], plan.jobs);
+  for (const t of technicians) total += routeTravel(t, plan.routes[t.id] ?? [], plan);
   return total;
 }
 
@@ -95,9 +119,9 @@ export function totalIdle(plan: Plan, technicians: Technician[]): number {
     for (const a of route) {
       busy += a.travelMin + (a.finish - a.start);
     }
-    if (route.length > 0) {
+    if (route.length > 0 && plan.rules.requireReturnHome) {
       const lastJob = plan.jobs[route[route.length - 1].jobId];
-      if (lastJob) busy += travelMinutes(lastJob.area, t.homeArea);
+      if (lastJob) busy += travelMinutes(plan.travel, lastJob.area, t.homeArea);
     }
     idle += Math.max(0, shift - busy);
   }
@@ -118,7 +142,7 @@ export function withoutJob(plan: Plan, jobId: string, technicians: Technician[])
   const remaining = routeJobIds(plan, techId).filter((id) => id !== jobId);
   return {
     ...plan,
-    routes: { ...plan.routes, [techId]: recomputeRoute(tech, remaining, plan.jobs) },
+    routes: { ...plan.routes, [techId]: recomputeRoute(tech, remaining, plan.jobs, plan.travel) },
   };
 }
 
@@ -149,10 +173,10 @@ export function tryPlacement(
   const res = checkFeasible(job, tech, predecessor(plan, tech, position), plan);
   if (!res.ok) return res;
 
-  const before = routeTravel(tech, plan.routes[tech.id] ?? [], plan.jobs);
+  const before = routeTravel(tech, plan.routes[tech.id] ?? [], plan);
   const nextIds = [...routeJobIds(plan, tech.id)];
   nextIds.splice(position, 0, job.id);
-  const after = routeTravel(tech, recomputeRoute(tech, nextIds, plan.jobs), plan.jobs);
+  const after = routeTravel(tech, recomputeRoute(tech, nextIds, plan.jobs, plan.travel), plan);
 
   return { ok: true, placement: { techId: tech.id, position, result: res, addedTravel: after - before } };
 }
@@ -161,7 +185,7 @@ export function tryPlacement(
 export function applyPlacement(plan: Plan, tech: Technician, job: Job, position: number): Plan {
   const ids = [...routeJobIds(plan, tech.id)];
   ids.splice(position, 0, job.id);
-  return { ...plan, routes: { ...plan.routes, [tech.id]: recomputeRoute(tech, ids, plan.jobs) } };
+  return { ...plan, routes: { ...plan.routes, [tech.id]: recomputeRoute(tech, ids, plan.jobs, plan.travel) } };
 }
 
 /** The cheapest legal home for `job` on `tech`'s day, or the reason there is none. */
@@ -272,7 +296,7 @@ export function diagnose(job: Job, technicians: Technician[], plan: Plan): Block
       jobId: job.id,
       rule: 'SKILL_MISMATCH',
       detail:
-        `No technician on today’s roster holds ${SKILL_LABEL[job.skill]}. ` +
+        `No technician on today’s roster holds ${skillLabel(job.skill)}. ` +
         `All ${technicians.length} were checked.`,
       perTech,
     };
@@ -322,7 +346,7 @@ function describeClash(job: Job, tech: Technician, plan: Plan, couldStartAt: num
     const lastJob = last ? plan.jobs[last.jobId] : undefined;
     return last && lastJob
       ? `${opening} today’s route ends on ${lastJob.code} in ${lastJob.area} at ` +
-          `${formatTime(last.finish)}, ${formatDuration(travelMinutes(lastJob.area, job.area))} from ${job.area}.`
+          `${formatTime(last.finish)}, ${formatDuration(travelMinutes(plan.travel, lastJob.area, job.area))} from ${job.area}.`
       : `${opening} no legal position exists in today’s route.`;
   }
   return `${opening} today is already on ${clashes.join(' and ')}.`;
@@ -374,8 +398,8 @@ export function buildTimeline(tech: Technician, plan: Plan): Segment[] {
   }
 
   // The leg home, then whatever is left of the shift.
-  if (route.length > 0) {
-    const home = travelMinutes(area, tech.homeArea);
+  if (route.length > 0 && plan.rules.requireReturnHome) {
+    const home = travelMinutes(plan.travel, area, tech.homeArea);
     if (home > 0) {
       segments.push({ kind: 'travel', from: cursor, to: cursor + home, fromArea: area, toArea: tech.homeArea });
       cursor += home;

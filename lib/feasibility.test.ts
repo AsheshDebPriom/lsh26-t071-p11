@@ -1,19 +1,30 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { CASES, PUBLISHED_CASES, caseWindow } from './cases';
 import { checkFeasible } from './feasibility';
-import { emptyPlan, applyPlacement, buildTimeline, refreshPlan, withEmptyRoute } from './plan';
-import { JOBS, TECHNICIANS } from './seed';
-import { randomBaseline, solve } from './solver';
-import { hm } from './time';
+import {
+  applyPlacement,
+  buildTimeline,
+  emptyPlan,
+  emptyPlanForCase,
+  refreshPlan,
+  withEmptyRoute,
+} from './plan';
+import { CRAFTED_DAY, CRAFTED_TRAVEL } from './seed';
+import { randomBaselineForCase, solveCase } from './solver';
+import { hm, parseHM } from './time';
 import { assertMatrixIsSane, travelMinutes } from './travel';
-import type { Job, Technician } from './types';
-import { SKILLS } from './types';
+import type { Job, Plan, RuleOptions, Technician } from './types';
+import { DEFAULT_RULES } from './types';
 
 /**
  * One case per RuleName, plus the happy path, plus the invariants the whole
- * board depends on. Run with `npm test`.
+ * board depends on, run against both the crafted day and all 25 published
+ * cases. `npm test`.
  */
+
+const RETURN_HOME: RuleOptions = { requireReturnHome: true };
 
 const gulshanTech: Technician = {
   id: 'TT', name: 'Test', skills: ['AC_SERVICE'],
@@ -32,12 +43,20 @@ function job(over: Partial<Job> & Pick<Job, 'id'>): Job {
   };
 }
 
-function planFor(tech: Technician, jobs: Job[]) {
-  return emptyPlan([tech], jobs);
+function planFor(tech: Technician, jobs: Job[], rules: RuleOptions = DEFAULT_RULES): Plan {
+  return emptyPlan([tech], jobs, CRAFTED_TRAVEL, rules);
 }
 
-test('travel matrix is symmetric, zero on the diagonal and inside 15..70', () => {
-  assertMatrixIsSane();
+test('parseHM and formatTime round-trip the published time format', () => {
+  assert.equal(parseHM('09:00'), 540);
+  assert.equal(parseHM('6:05'), 365);
+  assert.equal(parseHM('19:30'), 1170);
+  assert.throws(() => parseHM('nine'));
+});
+
+test('every travel table is symmetric and zero on the diagonal', () => {
+  assertMatrixIsSane(CRAFTED_TRAVEL, CRAFTED_DAY.areas);
+  for (const day of PUBLISHED_CASES) assertMatrixIsSane(day.travel, day.areas);
 });
 
 test('happy path: returns arrival, start and finish', () => {
@@ -83,10 +102,15 @@ test('OUTSIDE_SHIFT: work would finish after the shift ends', () => {
   assert.match(res.detail, /30m past/);
 });
 
-test('NO_RETURN_TIME: finishes inside the shift but cannot get home in it', () => {
+test('NO_RETURN_TIME: only bites when the return-home rule is switched on', () => {
   // Finishes 15:00 in Uttara; 70 minutes home to Motijheel lands 16:10 > 16:00.
   const j = job({ id: 'A', area: 'Uttara', windowStart: hm(13), windowEnd: hm(14), durationMin: 120 });
-  const res = checkFeasible(j, motijheelTech, null, planFor(motijheelTech, [j]));
+
+  // Default policy follows the published format note: no return home required.
+  const allowed = checkFeasible(j, motijheelTech, null, planFor(motijheelTech, [j]));
+  assert.equal(allowed.ok, true, 'with the rule off this is a legal day');
+
+  const res = checkFeasible(j, motijheelTech, null, planFor(motijheelTech, [j], RETURN_HOME));
   assert.equal(res.ok, false);
   if (res.ok) return;
   assert.equal(res.rule, 'NO_RETURN_TIME');
@@ -123,102 +147,150 @@ test('afterJob chains from the previous job area and finish time', () => {
   const res = checkFeasible(b, gulshanTech, a, plan);
   assert.equal(res.ok, true);
   if (!res.ok) return;
-  assert.equal(res.travelMin, travelMinutes('Gulshan', 'Banani'));
+  assert.equal(res.travelMin, travelMinutes(CRAFTED_TRAVEL, 'Gulshan', 'Banani'));
   assert.equal(res.arrival, hm(9, 15));
   assert.equal(res.start, hm(9, 15));
   assert.equal(res.finish, hm(9, 45));
 });
 
-// ---- Seed data and solver ----------------------------------------------
+// ---- Case data ---------------------------------------------------------
 
-test('seed data meets the stated minimums', () => {
-  assert.ok(TECHNICIANS.length >= 12, 'at least 12 technicians');
-  assert.ok(JOBS.length >= 30, 'at least 30 jobs');
-  for (const t of TECHNICIANS) {
-    assert.ok(t.shiftEnd > t.shiftStart, `${t.id} shift must be positive`);
-    assert.ok(t.skills.length > 0, `${t.id} needs a skill`);
+test('every case meets the stated minimums', () => {
+  assert.equal(PUBLISHED_CASES.length, 25, 'all published cases load');
+  for (const day of CASES) {
+    assert.ok(day.technicians.length >= 12, `${day.id}: at least 12 technicians`);
+    assert.ok(day.jobs.length >= 30, `${day.id}: at least 30 jobs`);
+    for (const t of day.technicians) {
+      assert.ok(t.shiftEnd > t.shiftStart, `${day.id}/${t.id} shift must be positive`);
+      assert.ok(t.skills.length > 0, `${day.id}/${t.id} needs a skill`);
+      assert.ok(day.areas.includes(t.homeArea), `${day.id}/${t.id} home area must be known`);
+    }
+    for (const j of day.jobs) {
+      assert.ok(j.windowEnd >= j.windowStart, `${day.id}/${j.code} window must not be inverted`);
+      assert.ok(j.durationMin > 0, `${day.id}/${j.code} needs a duration`);
+      assert.ok(day.areas.includes(j.area), `${day.id}/${j.code} area must be known`);
+    }
+    assert.equal(new Set(day.jobs.map((j) => j.id)).size, day.jobs.length, `${day.id} job ids unique`);
+    assert.equal(new Set(day.technicians.map((t) => t.id)).size, day.technicians.length, `${day.id} tech ids unique`);
+    const w = caseWindow(day);
+    assert.ok(w.end > w.start, `${day.id} board window must have width`);
   }
-  for (const j of JOBS) {
-    assert.ok(j.windowEnd >= j.windowStart, `${j.code} window must not be inverted`);
-    assert.ok(j.durationMin > 0, `${j.code} needs a duration`);
-    assert.ok(SKILLS.includes(j.skill), `${j.code} skill must be in the catalogue`);
-  }
-  assert.equal(new Set(JOBS.map((j) => j.id)).size, JOBS.length, 'job ids unique');
-  assert.equal(new Set(TECHNICIANS.map((t) => t.id)).size, TECHNICIANS.length, 'tech ids unique');
 });
 
-test('every job on the solved board is legal where it sits', () => {
-  const { plan } = solve(TECHNICIANS, JOBS);
-  for (const tech of TECHNICIANS) {
-    const route = plan.routes[tech.id] ?? [];
-    let scratch = withEmptyRoute(plan, tech.id);
-    let previous: Job | null = null;
-    for (const a of route) {
-      const j = plan.jobs[a.jobId];
-      const res = checkFeasible(j, tech, previous, scratch);
-      assert.equal(res.ok, true, `${j.code} on ${tech.name} must be legal`);
-      if (!res.ok) return;
-      assert.equal(res.start, a.start, `${j.code} start must match the board`);
-      assert.equal(res.finish, a.finish, `${j.code} finish must match the board`);
-      scratch = applyPlacement(scratch, tech, j, scratch.routes[tech.id].length);
-      previous = j;
+test('every published case carries the scripted manual move for requirement 4', () => {
+  for (const day of PUBLISHED_CASES) {
+    assert.ok(day.manualMove, `${day.id} should publish a manual_move`);
+    if (!day.manualMove) continue;
+    assert.ok(day.jobs.some((j) => j.id === day.manualMove!.jobId), `${day.id} move names a real job`);
+    assert.ok(
+      day.technicians.some((t) => t.id === day.manualMove!.toTechnicianId),
+      `${day.id} move names a real technician`,
+    );
+  }
+});
+
+// ---- Solver ------------------------------------------------------------
+
+test('every job on every solved board is legal where it sits', () => {
+  for (const day of CASES) {
+    const { plan } = solveCase(day);
+    for (const tech of day.technicians) {
+      const route = plan.routes[tech.id] ?? [];
+      let scratch = withEmptyRoute(plan, tech.id);
+      let previous: Job | null = null;
+      for (const a of route) {
+        const j = plan.jobs[a.jobId];
+        const res = checkFeasible(j, tech, previous, scratch);
+        assert.equal(res.ok, true, `${day.id}: ${j.code} on ${tech.name} must be legal`);
+        if (!res.ok) return;
+        assert.equal(res.start, a.start, `${day.id}: ${j.code} start must match the board`);
+        assert.equal(res.finish, a.finish, `${day.id}: ${j.code} finish must match the board`);
+        scratch = applyPlacement(scratch, tech, j, scratch.routes[tech.id].length);
+        previous = j;
+      }
     }
   }
 });
 
-test('the blocked list names a rule for every job it could not place', () => {
-  const { plan, stats } = solve(TECHNICIANS, JOBS);
+test('the blocked list names a rule and a human reason for every unplaced job', () => {
+  for (const day of CASES) {
+    const { plan } = solveCase(day);
+    const placed = new Set(Object.values(plan.routes).flatMap((r) => r.map((a) => a.jobId)));
+    const unplaced = day.jobs.filter((j) => !placed.has(j.id));
+    assert.equal(plan.blocked.length, unplaced.length, `${day.id}: every unplaced job is explained`);
+    for (const b of plan.blocked) {
+      assert.ok(b.detail.length > 20, `${day.id}/${b.jobId} needs a human reason, got "${b.detail}"`);
+      assert.equal(b.perTech.length, day.technicians.length, `${day.id}/${b.jobId} checked against everyone`);
+      assert.ok(!b.nowPlaceable, `${day.id}/${b.jobId} must not be placeable after solving`);
+    }
+  }
+});
+
+test('the crafted day demonstrates all five hard rules at once', () => {
+  const { plan, stats } = solveCase(CRAFTED_DAY);
   assert.ok(stats.assigned >= 30, `expected 30+ jobs assigned, got ${stats.assigned}`);
-  assert.ok(plan.blocked.length >= 4 && plan.blocked.length <= 6,
-    `expected 4-6 blocked jobs, got ${plan.blocked.length}`);
-
-  for (const b of plan.blocked) {
-    assert.ok(b.detail.length > 20, `${b.jobId} needs a human reason, got "${b.detail}"`);
-    assert.equal(b.perTech.length, TECHNICIANS.length, `${b.jobId} must be checked against everyone`);
-  }
-
-  const rules = new Set(plan.blocked.map((b) => b.rule));
-  for (const expected of ['SKILL_MISMATCH', 'OUTSIDE_SHIFT', 'WINDOW_MISSED', 'NO_RETURN_TIME', 'OVERLAPS_JOB']) {
-    assert.ok(rules.has(expected as never), `seed data should demonstrate ${expected}; got ${[...rules].join(', ')}`);
-  }
-});
-
-test('the improvement pass lowers travel and never raises it', () => {
-  const { stats } = solve(TECHNICIANS, JOBS);
-  assert.ok(stats.totalTravelMin <= stats.greedyTravelMin,
-    `improvement pass must not make travel worse (${stats.greedyTravelMin} -> ${stats.totalTravelMin})`);
-  assert.ok(stats.swapsApplied + stats.relocationsApplied > 0, 'the pass should find at least one improvement');
-  assert.ok(stats.totalTravelMin < stats.greedyTravelMin, 'and that improvement should show in the objective');
-});
-
-test('the optimised plan is clearly better than random', () => {
-  const { plan, stats } = solve(TECHNICIANS, JOBS);
-  const baseline = randomBaseline(TECHNICIANS, JOBS);
   assert.ok(
-    stats.totalTravelMin < baseline.meanTravelMin,
-    `optimised ${stats.totalTravelMin} should beat random mean ${baseline.meanTravelMin}`,
+    plan.blocked.length >= 4 && plan.blocked.length <= 6,
+    `expected 4-6 blocked jobs, got ${plan.blocked.length}`,
   );
-  assert.ok(stats.assigned >= baseline.meanAssigned, 'and should not place fewer jobs');
-  assert.equal(plan.totalTravelMin, stats.totalTravelMin);
+  const rules = new Set(plan.blocked.map((b) => b.rule));
+  for (const expected of [
+    'SKILL_MISMATCH', 'OUTSIDE_SHIFT', 'WINDOW_MISSED', 'NO_RETURN_TIME', 'OVERLAPS_JOB',
+  ]) {
+    assert.ok(rules.has(expected as never), `crafted day should show ${expected}; got ${[...rules].join(', ')}`);
+  }
+});
+
+test('the improvement pass never makes the objective worse', () => {
+  for (const day of CASES) {
+    const { stats } = solveCase(day);
+    assert.ok(
+      stats.totalTravelMin <= stats.greedyTravelMin,
+      `${day.id}: improvement pass raised travel (${stats.greedyTravelMin} -> ${stats.totalTravelMin})`,
+    );
+  }
+});
+
+test('the optimised plan is clearly better than random on every case', () => {
+  for (const day of CASES) {
+    const { stats } = solveCase(day);
+    const baseline = randomBaselineForCase(day, undefined, 10);
+    assert.ok(
+      stats.totalTravelMin < baseline.meanTravelMin,
+      `${day.id}: optimised ${stats.totalTravelMin} should beat random mean ${baseline.meanTravelMin}`,
+    );
+    assert.ok(
+      stats.assigned >= baseline.meanAssigned,
+      `${day.id}: optimised placed ${stats.assigned}, random averaged ${baseline.meanAssigned}`,
+    );
+  }
 });
 
 test('the timeline accounts for every minute of a technician shift', () => {
-  const { plan } = solve(TECHNICIANS, JOBS);
-  for (const tech of TECHNICIANS) {
-    const segments = buildTimeline(tech, plan);
-    let cursor = tech.shiftStart;
-    for (const s of segments) {
-      assert.equal(s.from, cursor, `${tech.id} timeline must be contiguous`);
-      assert.ok(s.to > s.from, `${tech.id} segment must have length`);
-      cursor = s.to;
+  for (const day of CASES) {
+    const { plan } = solveCase(day);
+    for (const tech of day.technicians) {
+      const segments = buildTimeline(tech, plan);
+      let cursor = tech.shiftStart;
+      for (const s of segments) {
+        assert.equal(s.from, cursor, `${day.id}/${tech.id} timeline must be contiguous`);
+        assert.ok(s.to > s.from, `${day.id}/${tech.id} segment must have length`);
+        cursor = s.to;
+      }
+      assert.equal(cursor, tech.shiftEnd, `${day.id}/${tech.id} timeline must cover the whole shift`);
     }
-    assert.equal(cursor, tech.shiftEnd, `${tech.id} timeline must cover the whole shift`);
   }
 });
 
 test('refreshPlan keeps the objective and the blocked list in step', () => {
-  const { plan } = solve(TECHNICIANS, JOBS);
-  const again = refreshPlan(plan, TECHNICIANS, JOBS);
+  const { plan } = solveCase(CRAFTED_DAY);
+  const again = refreshPlan(plan, CRAFTED_DAY.technicians, CRAFTED_DAY.jobs);
   assert.equal(again.totalTravelMin, plan.totalTravelMin);
   assert.equal(again.blocked.length, plan.blocked.length);
+});
+
+test('an empty plan for a case starts with every job blocked and no travel', () => {
+  const plan = refreshPlan(emptyPlanForCase(CRAFTED_DAY), CRAFTED_DAY.technicians, CRAFTED_DAY.jobs);
+  assert.equal(plan.totalTravelMin, 0);
+  assert.equal(plan.blocked.length, CRAFTED_DAY.jobs.length);
 });

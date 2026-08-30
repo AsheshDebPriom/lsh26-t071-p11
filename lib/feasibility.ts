@@ -1,7 +1,7 @@
 import { formatDuration, formatTime } from './time';
 import { travelMinutes } from './travel';
 import type { FeasibilityResult, Job, Plan, Technician } from './types';
-import { SKILL_LABEL } from './types';
+import { skillLabel } from './types';
 
 /**
  * THE single authority on whether a job may sit on a technician's day.
@@ -26,7 +26,7 @@ export function checkFeasible(
 ): FeasibilityResult {
   // ---- Rule: the right skill. -------------------------------------------
   if (!tech.skills.includes(job.skill)) {
-    const held = tech.skills.map((s) => SKILL_LABEL[s]);
+    const held = tech.skills.map(skillLabel);
     const heldText =
       held.length === 0
         ? 'holds no skills on today’s roster'
@@ -34,7 +34,7 @@ export function checkFeasible(
     return {
       ok: false,
       rule: 'SKILL_MISMATCH',
-      detail: `Needs ${SKILL_LABEL[job.skill]}. ${tech.name} ${heldText}.`,
+      detail: `Needs ${skillLabel(job.skill)}. ${tech.name} ${heldText}.`,
     };
   }
 
@@ -61,7 +61,7 @@ export function checkFeasible(
     followerIndex = i + 1;
   }
 
-  const travelMin = travelMinutes(fromArea, job.area);
+  const travelMin = travelMinutes(plan.travel, fromArea, job.area);
   const arrival = departure + travelMin;
   // Arriving early is allowed; the technician waits, and that wait is drawn as
   // idle time. Work starts at the later of "arrived" and "window opened".
@@ -109,10 +109,12 @@ export function checkFeasible(
   }
 
   // ---- Rule: able to reach the home area before shift end. --------------
-  // AMBIGUITY CALL: the day is only feasible if the technician can get home
-  // inside their shift. This is the NO_RETURN_TIME rule.
-  const homeLeg = travelMinutes(job.area, tech.homeArea);
-  if (finish + homeLeg > tech.shiftEnd) {
+  // OFF BY DEFAULT. The published P11 format note states that no return home is
+  // required, and a published clarification is part of the specification. The
+  // rule is kept and still tested, and the dispatcher can switch it on to see
+  // what an end-of-shift return policy would cost. See RuleOptions in types.ts.
+  const homeLeg = travelMinutes(plan.travel, job.area, tech.homeArea);
+  if (plan.rules.requireReturnHome && finish + homeLeg > tech.shiftEnd) {
     const over = finish + homeLeg - tech.shiftEnd;
     return {
       ok: false,
@@ -131,7 +133,7 @@ export function checkFeasible(
   if (follower) {
     const followerJob = plan.jobs[follower.jobId];
     const followerArea = followerJob?.area ?? job.area;
-    const legToFollower = travelMinutes(job.area, followerArea);
+    const legToFollower = travelMinutes(plan.travel, job.area, followerArea);
     const arriveAtFollower = finish + legToFollower;
     if (arriveAtFollower > follower.start) {
       const over = arriveAtFollower - follower.start;

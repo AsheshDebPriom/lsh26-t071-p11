@@ -26,6 +26,13 @@ export function formatSpan(from: number, to: number): string {
   return `${formatTime(from)}–${formatTime(to)}`;
 }
 
+/** "09:30" -> 570. The only parser; case files arrive as HH:MM strings. */
+export function parseHM(text: string): number {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(text.trim());
+  if (!m) throw new Error(`Not a HH:MM time: ${text}`);
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
 /** Seed-data helper so shift and window literals stay legible: hm(9, 30) === 570. */
 export function hm(hours: number, minutes = 0): number {
   return hours * 60 + minutes;

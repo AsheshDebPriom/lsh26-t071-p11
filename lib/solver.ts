@@ -12,7 +12,7 @@ import {
   tryPlacement,
   withoutJob,
 } from './plan';
-import type { Job, Plan, Technician } from './types';
+import type { DayCase, Job, Plan, RuleOptions, Technician, TravelMatrix } from './types';
 
 /**
  * THE STATED GOAL
@@ -40,6 +40,8 @@ export interface SolveStats {
   swapIterations: number;
   relocationsApplied: number;
   relocationIterations: number;
+  /** Which job ordering produced this plan. See `orderings`. */
+  ordering: string;
 }
 
 export interface SolveOutcome {
@@ -50,29 +52,99 @@ export interface SolveOutcome {
 /**
  * Greedy insertion, then one improvement pass.
  *
- * Pass 1 — sort jobs by window end ascending, tightest deadline first, and give
- * each job to the technician and route position where it adds the least travel.
- * Every candidate is cleared by checkFeasible; nothing infeasible is ever placed.
+ * Pass 1 — take the jobs in order (tightest deadline first) and give each one to
+ * the technician and route position where it adds the least travel. Every
+ * candidate is cleared by checkFeasible, so nothing infeasible is ever placed.
  *
- * Pass 2 — the improvement pass, in two halves, then a final sweep that retries
- * anything still unplaced against the rearranged board.
- * First, for each pair of
- * assigned jobs, try exchanging their technicians. Then, for each single job,
- * try relocating it to a different technician. A move is kept only when both
- * halves stay feasible and total travel drops. Each half is capped at
- * MAX_SWAP_ITERATIONS so the browser can never be hung by a pathological day.
+ * Pass 2 — the improvement pass, in two halves. First, for each pair of assigned
+ * jobs, try exchanging their technicians. Then, for each single job, try
+ * relocating it to a different technician. A move is kept only when everything
+ * stays feasible and total travel drops. Each half is capped at
+ * MAX_SWAP_ITERATIONS so a pathological day can never hang the browser.
+ *
+ * Pass 3 — a final sweep that retries anything still unplaced against the
+ * rearranged board, because moving work about can open a slot that was shut
+ * when a job was first considered.
  */
-export function solve(technicians: Technician[], jobs: Job[]): SolveOutcome {
-  let plan = emptyPlan(technicians, jobs);
+export function solveCase(day: DayCase, rules?: RuleOptions): SolveOutcome {
+  return solve(day.technicians, day.jobs, day.travel, rules ?? day.defaultRules);
+}
 
-  const queue = [...jobs].sort(
-    (a, b) =>
-      a.windowEnd - b.windowEnd ||
-      a.windowStart - b.windowStart ||
-      a.durationMin - b.durationMin ||
-      a.id.localeCompare(b.id),
-  );
+/**
+ * The order jobs are offered to the fleet. The first entry is the order the
+ * design calls for — tightest deadline first — and it wins on most days. The
+ * rest are restarts: greedy insertion commits a technician before it has seen
+ * the whole day, so a different order occasionally fits one more job in. The
+ * best candidate is kept, and "best" means more jobs placed first, less travel
+ * second. A plan that drops a call to save fifteen minutes of driving is not a
+ * better plan.
+ */
+function orderings(technicians: Technician[]): { name: string; sort: (a: Job, b: Job) => number }[] {
+  const qualifiedCount = (j: Job) => technicians.filter((t) => t.skills.includes(j.skill)).length;
+  return [
+    {
+      name: 'tightest deadline first',
+      sort: (a, b) =>
+        a.windowEnd - b.windowEnd ||
+        a.windowStart - b.windowStart ||
+        a.durationMin - b.durationMin ||
+        a.id.localeCompare(b.id),
+    },
+    {
+      name: 'narrowest window first',
+      sort: (a, b) =>
+        a.windowEnd - a.windowStart - (b.windowEnd - b.windowStart) ||
+        a.windowEnd - b.windowEnd ||
+        a.id.localeCompare(b.id),
+    },
+    {
+      name: 'longest job first',
+      sort: (a, b) => b.durationMin - a.durationMin || a.windowEnd - b.windowEnd || a.id.localeCompare(b.id),
+    },
+    {
+      name: 'scarcest skill first',
+      sort: (a, b) =>
+        qualifiedCount(a) - qualifiedCount(b) || a.windowEnd - b.windowEnd || a.id.localeCompare(b.id),
+    },
+  ];
+}
 
+export function solve(
+  technicians: Technician[],
+  jobs: Job[],
+  travel: TravelMatrix,
+  rules?: RuleOptions,
+): SolveOutcome {
+  let best: SolveOutcome | null = null;
+
+  for (const ordering of orderings(technicians)) {
+    const candidate = solveWithOrder(technicians, jobs, travel, ordering, rules);
+    if (
+      !best ||
+      candidate.stats.assigned > best.stats.assigned ||
+      (candidate.stats.assigned === best.stats.assigned &&
+        candidate.stats.totalTravelMin < best.stats.totalTravelMin)
+    ) {
+      best = candidate;
+    }
+  }
+
+  return best!;
+}
+
+function solveWithOrder(
+  technicians: Technician[],
+  jobs: Job[],
+  travel: TravelMatrix,
+  ordering: { name: string; sort: (a: Job, b: Job) => number },
+  rules?: RuleOptions,
+): SolveOutcome {
+  let plan = emptyPlan(technicians, jobs, travel, rules);
+
+  const queue = [...jobs].sort(ordering.sort);
+
+  // Pass 1 — greedy insertion. Each job goes to the technician and route
+  // position where it adds the least travel, and only where the rules allow.
   for (const job of queue) {
     const best = bestPlacement(plan, job, technicians);
     if (!best) continue; // no legal home anywhere; the blocked list will say why
@@ -82,6 +154,7 @@ export function solve(technicians: Technician[], jobs: Job[]): SolveOutcome {
 
   const greedyTravelMin = totalTravel(plan, technicians);
 
+  // Pass 2 — the improvement pass, in two halves.
   const swap = improveBySwapping(plan, technicians);
   const reloc = improveByRelocating(swap.plan, technicians);
   plan = reloc.plan;
@@ -92,9 +165,9 @@ export function solve(technicians: Technician[], jobs: Job[]): SolveOutcome {
   const onBoard = assignedJobIds(plan);
   for (const job of queue) {
     if (onBoard.has(job.id)) continue;
-    const best = bestPlacement(plan, job, technicians);
-    if (!best) continue;
-    plan = applyPlacement(plan, technicians.find((t) => t.id === best.techId)!, job, best.position);
+    const landing = bestPlacement(plan, job, technicians);
+    if (!landing) continue;
+    plan = applyPlacement(plan, technicians.find((t) => t.id === landing.techId)!, job, landing.position);
   }
 
   plan = refreshPlan(plan, technicians, jobs);
@@ -111,6 +184,7 @@ export function solve(technicians: Technician[], jobs: Job[]): SolveOutcome {
       swapIterations: swap.iterations,
       relocationsApplied: reloc.applied,
       relocationIterations: reloc.iterations,
+      ordering: ordering.name,
     },
   };
 }
@@ -267,9 +341,15 @@ export interface BaselineStats {
  * checkFeasible — just an unconsidered one. This is the number the optimised
  * plan is measured against on screen.
  */
+export function randomBaselineForCase(day: DayCase, rules?: RuleOptions, runs = 25): BaselineStats {
+  return randomBaseline(day.technicians, day.jobs, day.travel, rules ?? day.defaultRules, runs);
+}
+
 export function randomBaseline(
   technicians: Technician[],
   jobs: Job[],
+  travel: TravelMatrix,
+  rules?: RuleOptions,
   runs = 25,
   seed = 20260830,
 ): BaselineStats {
@@ -280,7 +360,7 @@ export function randomBaseline(
 
   for (let r = 0; r < runs; r++) {
     const rand = mulberry32(seed + r * 7919);
-    let plan = emptyPlan(technicians, jobs);
+    let plan = emptyPlan(technicians, jobs, travel, rules);
 
     for (const job of shuffled(jobs, rand)) {
       let landed = false;
@@ -297,11 +377,11 @@ export function randomBaseline(
       }
     }
 
-    const travel = totalTravel(plan, technicians);
-    sum += travel;
+    const runTravel = totalTravel(plan, technicians);
+    sum += runTravel;
     assignedSum += Object.values(plan.routes).reduce((n, route) => n + route.length, 0);
-    best = Math.min(best, travel);
-    worst = Math.max(worst, travel);
+    best = Math.min(best, runTravel);
+    worst = Math.max(worst, runTravel);
   }
 
   return {
@@ -317,7 +397,7 @@ export function randomBaseline(
 export function rebuildRoutes(plan: Plan, technicians: Technician[]): Plan {
   const routes = { ...plan.routes };
   for (const tech of technicians) {
-    routes[tech.id] = recomputeRoute(tech, routeJobIds(plan, tech.id), plan.jobs);
+    routes[tech.id] = recomputeRoute(tech, routeJobIds(plan, tech.id), plan.jobs, plan.travel);
   }
   return { ...plan, routes };
 }

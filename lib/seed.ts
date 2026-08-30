@@ -1,5 +1,27 @@
 import { hm } from './time';
-import type { Job, Technician } from './types';
+import type { Area, DayCase, Job, Technician, TravelMatrix } from './types';
+
+export const CRAFTED_AREAS: Area[] = [
+  'Mirpur', 'Uttara', 'Gulshan', 'Banani',
+  'Dhanmondi', 'Mohammadpur', 'Bashundhara', 'Motijheel',
+];
+
+/**
+ * Travel table for the crafted day, mocked to match how Dhaka actually moves at
+ * dispatch hours: Uttara to Motijheel is the length of the city, Gulshan to
+ * Banani is a five-minute crawl. Symmetric, 15-70 minutes off the diagonal,
+ * zero on it.
+ */
+export const CRAFTED_TRAVEL: TravelMatrix = {
+  Mirpur:      { Mirpur: 0,  Uttara: 40, Gulshan: 35, Banani: 30, Dhanmondi: 35, Mohammadpur: 25, Bashundhara: 45, Motijheel: 60 },
+  Uttara:      { Mirpur: 40, Uttara: 0,  Gulshan: 30, Banani: 28, Dhanmondi: 55, Mohammadpur: 50, Bashundhara: 25, Motijheel: 70 },
+  Gulshan:     { Mirpur: 35, Uttara: 30, Gulshan: 0,  Banani: 15, Dhanmondi: 35, Mohammadpur: 40, Bashundhara: 20, Motijheel: 45 },
+  Banani:      { Mirpur: 30, Uttara: 28, Gulshan: 15, Banani: 0,  Dhanmondi: 33, Mohammadpur: 35, Bashundhara: 25, Motijheel: 48 },
+  Dhanmondi:   { Mirpur: 35, Uttara: 55, Gulshan: 35, Banani: 33, Dhanmondi: 0,  Mohammadpur: 18, Bashundhara: 50, Motijheel: 40 },
+  Mohammadpur: { Mirpur: 25, Uttara: 50, Gulshan: 40, Banani: 35, Dhanmondi: 18, Mohammadpur: 0,  Bashundhara: 55, Motijheel: 45 },
+  Bashundhara: { Mirpur: 45, Uttara: 25, Gulshan: 20, Banani: 25, Dhanmondi: 50, Mohammadpur: 55, Bashundhara: 0,  Motijheel: 55 },
+  Motijheel:   { Mirpur: 60, Uttara: 70, Gulshan: 45, Banani: 48, Dhanmondi: 40, Mohammadpur: 45, Bashundhara: 55, Motijheel: 0  },
+};
 
 /**
  * Mocked day for a Dhaka home-service company: 12 technicians, 37 jobs.
@@ -91,6 +113,22 @@ export const JOBS: Job[] = [
   { id: 'J37', code: 'J-37', customer: 'Proshanti Residence',  area: 'Dhanmondi',   skill: 'ELECTRICAL', durationMin: 60,  windowStart: hm(10),     windowEnd: hm(13) },
 ];
 
-/** The board window. Every block on the timeline is drawn on this scale. */
-export const DAY_START = hm(8);
-export const DAY_END = hm(19);
+/**
+ * The crafted day, kept alongside the published cases because it walks through
+ * every hard rule on purpose: five jobs are unassignable, one per rule, so the
+ * blocked list can never be empty in a demo. It is authored against the
+ * return-home rule being IN force, which is what makes J-36 a NO_RETURN_TIME
+ * case rather than an ordinary one.
+ */
+export const CRAFTED_DAY: DayCase = {
+  id: 'CRAFTED-DHAKA',
+  label: 'Crafted demo day',
+  today: '2026-08-30',
+  areas: CRAFTED_AREAS,
+  travel: CRAFTED_TRAVEL,
+  technicians: TECHNICIANS,
+  jobs: JOBS,
+  source: 'crafted',
+  defaultRules: { requireReturnHome: true },
+  note: 'Hand-built so that exactly one job is blocked by each of the five hard rules.',
+};

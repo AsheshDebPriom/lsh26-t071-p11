@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { PUBLISHED_CASES } from './cases';
-import { arcBetween, areaLatLng, hasAreaLatLng, technicianColour } from './geo';
+import { arcBetween, areaLatLng, hasAreaLatLng, pointAlongArc, technicianColour } from './geo';
 import { emptyPlanForCase } from './plan';
 import { areaLoad, buildRoutes } from './routes';
 import { CRAFTED_DAY } from './seed';
@@ -65,6 +65,16 @@ test('an arc starts and ends exactly on its two areas', () => {
     Math.hypot(arcMid[0] - straightMid.lat, arcMid[1] - straightMid.lng) > 0.001,
     'the arc should not be a straight line',
   );
+});
+
+test('continuous playback follows the exact curve used to draw a route', () => {
+  const a = areaLatLng('Uttara');
+  const b = areaLatLng('Motijheel');
+  const arc = arcBetween(a, b);
+
+  assert.deepEqual(pointAlongArc(a, b, 0), a);
+  assert.deepEqual(pointAlongArc(a, b, 1), b);
+  assert.deepEqual(pointAlongArc(a, b, 0.5), { lat: arc[12][0], lng: arc[12][1] });
 });
 
 test('each technician colour is distinct and never the alarm red', () => {

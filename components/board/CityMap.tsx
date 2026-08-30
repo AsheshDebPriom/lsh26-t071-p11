@@ -1,12 +1,13 @@
 'use client';
 
-import type { Map as LeafletMap, LayerGroup, Polyline } from 'leaflet';
+import type { CircleMarker, Map as LeafletMap, LayerGroup, Marker, Polyline } from 'leaflet';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { arcBetween, areaLatLng, type LatLng } from '@/lib/geo';
+import { arcBetween, areaLatLng, pointAlongArc, type LatLng } from '@/lib/geo';
 import { describeReach, fleetAt, fleetSummary, positionAt, reachFor } from '@/lib/playback';
 import { areaLoad, buildRoutes, longestLeg, worstLegs } from '@/lib/routes';
 import { formatDuration, formatTime } from '@/lib/time';
+import { travelMinutes } from '@/lib/travel';
 import type { DayCase, Plan } from '@/lib/types';
 
 /**
@@ -62,8 +63,12 @@ export function CityMap({
 }: Props) {
   const holder = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<LeafletMap | null>(null);
-  const layersRef = useRef<LayerGroup | null>(null);
+  const leafletRef = useRef<typeof import('leaflet') | null>(null);
+  const planLayersRef = useRef<LayerGroup | null>(null);
+  const playbackLayersRef = useRef<LayerGroup | null>(null);
   const routeLayers = useRef<Map<string, Polyline[]>>(new Map());
+  const fleetLayers = useRef<Map<string, { dot: CircleMarker; label: Marker; name: string }>>(new Map());
+  const trailLayer = useRef<Polyline | null>(null);
   const [tilesFailed, setTilesFailed] = useState(false);
   const [ready, setReady] = useState(false);
 
@@ -73,6 +78,7 @@ export function CityMap({
 
   // The scrubber. `null` means "show the whole day at once".
   const [clock, setClock] = useState<number | null>(null);
+  const clockRef = useRef<number | null>(null);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(4);
 
@@ -89,7 +95,14 @@ export function CityMap({
     const route = plan.routes[followTech.id] ?? [];
     if (route.length === 0) return null;
     const last = route[route.length - 1];
-    return { from: route[0].departure, to: Math.min(followTech.shiftEnd, last.finish + 30) };
+    const lastArea = plan.jobs[last.jobId]?.area ?? followTech.homeArea;
+    const returnTravel = plan.rules.requireReturnHome
+      ? travelMinutes(plan.travel, lastArea, followTech.homeArea)
+      : 0;
+    return {
+      from: route[0].departure,
+      to: Math.min(followTech.shiftEnd, last.finish + (returnTravel || 30)),
+    };
   }, [followTech, plan]);
 
   const fleet = useMemo(
@@ -110,23 +123,37 @@ export function CityMap({
     [blockedJob, day, plan],
   );
 
-  // The clock advances by `speed` minutes of the day every tick. Following one
-  // technician runs over their own hours; otherwise it runs the whole board.
+  useEffect(() => {
+    clockRef.current = clock;
+  }, [clock]);
+
+  // Advance from elapsed real time rather than adding a large discrete jump on
+  // every interval. The UI still uses the original 1×/2×/5× day speeds, but the
+  // position between two clock minutes is now continuous.
   useEffect(() => {
     if (!playing) return;
     const from = followSpan?.from ?? dayStart;
     const to = followSpan?.to ?? dayEnd;
-    const id = window.setInterval(() => {
-      setClock((c) => {
-        const next = (c ?? from) + speed;
-        if (next >= to) {
-          setPlaying(false);
-          return to;
-        }
-        return next;
-      });
-    }, 60);
-    return () => window.clearInterval(id);
+    const startedAt = performance.now();
+    const current = clockRef.current;
+    const startClock = current === null || current >= to ? from : current;
+    if (startClock !== current) setClock(startClock);
+    let frame = 0;
+
+    const advance = (now: number) => {
+      // `speed` used to mean this many simulated minutes every 60 ms.
+      const next = startClock + ((now - startedAt) / 60) * speed;
+      if (next >= to) {
+        setClock(to);
+        setPlaying(false);
+        return;
+      }
+      setClock(next);
+      frame = window.requestAnimationFrame(advance);
+    };
+
+    frame = window.requestAnimationFrame(advance);
+    return () => window.cancelAnimationFrame(frame);
   }, [playing, speed, dayStart, dayEnd, followSpan]);
 
   /** Start following a technician from the moment they set off. */
@@ -153,18 +180,23 @@ export function CityMap({
     const from = followSpan?.from ?? followTech.shiftStart;
     const points: [number, number][] = [];
     const step = Math.max(2, Math.round((clock - from) / 90));
-    for (let m = from; m <= clock; m += step) {
-      const at = positionAt(followTech, plan, m);
-      if (at.kind === 'off') continue;
+
+    const append = (minutes: number) => {
+      const at = positionAt(followTech, plan, minutes);
+      if (at.kind === 'off') return;
       if (at.kind === 'at') {
         const p = areaLatLng(at.area);
         points.push([p.lat, p.lng]);
-      } else {
-        const arc = arcBetween(areaLatLng(at.from), areaLatLng(at.to));
-        const i = Math.min(arc.length - 1, Math.max(0, Math.round(at.t * (arc.length - 1))));
-        points.push(arc[i]);
+        return;
       }
-    }
+      const p = pointAlongArc(areaLatLng(at.from), areaLatLng(at.to), at.t);
+      points.push([p.lat, p.lng]);
+    };
+
+    for (let minutes = from; minutes <= clock; minutes += step) append(minutes);
+    // Adaptive sampling will not normally land exactly on the current frame;
+    // append it so the trail always meets the moving marker.
+    append(clock);
     return points;
   }, [followTech, plan, clock, followSpan]);
 
@@ -174,8 +206,9 @@ export function CityMap({
   useEffect(() => {
     let cancelled = false;
     let map: LeafletMap | null = null;
-    // Captured for the cleanup, which runs long after the ref may have moved on.
+    // Captured for the cleanup, which runs long after the refs may have moved on.
     const layerIndex = routeLayers.current;
+    const markerIndex = fleetLayers.current;
 
     // Leaflet reaches for `window`, so it is loaded in the browser only.
     import('leaflet').then((mod) => {
@@ -198,7 +231,9 @@ export function CityMap({
 
       map.setView([23.78, 90.4], 12);
       mapRef.current = map;
-      layersRef.current = L.layerGroup().addTo(map);
+      leafletRef.current = L;
+      planLayersRef.current = L.layerGroup().addTo(map);
+      playbackLayersRef.current = L.layerGroup().addTo(map);
       setReady(true);
 
       // The container is often still sizing when the view switches to the map.
@@ -209,8 +244,12 @@ export function CityMap({
       cancelled = true;
       mapRef.current?.remove();
       mapRef.current = null;
-      layersRef.current = null;
+      leafletRef.current = null;
+      planLayersRef.current = null;
+      playbackLayersRef.current = null;
       layerIndex.clear();
+      markerIndex.clear();
+      trailLayer.current = null;
     };
   }, []);
 
@@ -225,104 +264,174 @@ export function CityMap({
   // ---- Draw the plan. ---------------------------------------------------
   useEffect(() => {
     if (!ready) return;
-    const map = mapRef.current;
-    const group = layersRef.current;
-    if (!map || !group) return;
+    const L = leafletRef.current;
+    const group = planLayersRef.current;
+    if (!L || !group) return;
 
-    let cancelled = false;
-    import('leaflet').then((mod) => {
-      const L = mod.default ?? mod;
-      if (cancelled) return;
+    group.clearLayers();
+    routeLayers.current.clear();
 
-      group.clearLayers();
-      routeLayers.current.clear();
+    const point = (area: string, i = 0) => areaLatLng(area, i, day.areas.length);
 
-      const point = (area: string, i = 0) => areaLatLng(area, i, day.areas.length);
+    const load = areaLoad(day, plan);
 
-      const load = areaLoad(day, plan);
+    // Routes first, so the area markers sit on top of them. A leg is drawn
+    // as thick as it is expensive: the objective, made visible.
+    const worstKeys = new Set(worst.map((w) => `${w.route.techId}|${w.leg.from}|${w.leg.to}`));
 
-      // Routes first, so the area markers sit on top of them. A leg is drawn
-      // as thick as it is expensive: the objective, made visible.
-      const worstKeys = new Set(worst.map((w) => `${w.route.techId}|${w.leg.from}|${w.leg.to}`));
+    routes.forEach((route, ri) => {
+      const drawn: Polyline[] = [];
+      route.legs.forEach((leg) => {
+        const from = point(leg.from);
+        const to = point(leg.to);
+        const share = leg.minutes / maxLeg;
+        const isWorst = worstKeys.has(`${route.techId}|${leg.from}|${leg.to}`);
 
-      routes.forEach((route, ri) => {
-        const drawn: Polyline[] = [];
-        route.legs.forEach((leg) => {
-          const from = point(leg.from);
-          const to = point(leg.to);
-          const share = leg.minutes / maxLeg;
-          const isWorst = worstKeys.has(`${route.techId}|${leg.from}|${leg.to}`);
-
-          const line = L.polyline(arcBetween(from, to), {
-            color: route.colour,
-            weight: 1.8 + share * 6,
-            opacity: 0.45 + share * 0.45,
-            lineCap: 'round',
-            className: isWorst ? 'route-leg route-leg-worst' : 'route-leg',
-          });
-          line.bindTooltip(
-            `<b>${route.name}</b><br>${leg.from} → ${leg.to}<br>` +
-              `<b>${formatDuration(leg.minutes)} driving</b><br>${leg.label}` +
-              (isWorst ? '<br><i>one of the three most expensive legs today</i>' : ''),
-            { sticky: true },
-          );
-          line.on('mouseover', () => onHighlightTech(route.techId));
-          line.on('mouseout', () => onHighlightTech(null));
-          line.on('add', () => {
-            const el = line.getElement() as SVGPathElement | null;
-            if (el) el.style.animationDelay = `${ri * 70}ms`;
-          });
-          line.addTo(group);
-          drawn.push(line);
+        const line = L.polyline(arcBetween(from, to), {
+          color: route.colour,
+          weight: 1.8 + share * 6,
+          opacity: 0.45 + share * 0.45,
+          lineCap: 'round',
+          className: isWorst ? 'route-leg route-leg-worst' : 'route-leg',
         });
-        routeLayers.current.set(route.techId, drawn);
+        line.bindTooltip(
+          `<b>${route.name}</b><br>${leg.from} → ${leg.to}<br>` +
+            `<b>${formatDuration(leg.minutes)} driving</b><br>${leg.label}` +
+            (isWorst ? '<br><i>one of the three most expensive legs today</i>' : ''),
+          { sticky: true },
+        );
+        line.on('mouseover', () => onHighlightTech(route.techId));
+        line.on('mouseout', () => onHighlightTech(null));
+        line.on('add', () => {
+          const el = line.getElement() as SVGPathElement | null;
+          if (el) el.style.animationDelay = `${ri * 70}ms`;
+        });
+        line.addTo(group);
+        drawn.push(line);
       });
+      routeLayers.current.set(route.techId, drawn);
+    });
 
-      // Areas.
-      day.areas.forEach((area, i) => {
-        const p = point(area, i);
-        const l = load.get(area) ?? { total: 0, blocked: 0 };
-        const radius = 7 + Math.min(13, l.total * 1.2);
+    // Areas.
+    day.areas.forEach((area, i) => {
+      const p = point(area, i);
+      const l = load.get(area) ?? { total: 0, blocked: 0 };
+      const radius = 7 + Math.min(13, l.total * 1.2);
 
-        if (l.blocked > 0) {
-          L.circleMarker([p.lat, p.lng], {
-            radius: radius + 7,
-            color: 'oklch(0.665 0.196 25)',
-            weight: 2,
-            fill: false,
-            className: 'area-alarm',
-            interactive: false,
-          }).addTo(group);
-        }
-
+      if (l.blocked > 0) {
         L.circleMarker([p.lat, p.lng], {
-          radius,
-          color: l.blocked > 0 ? 'oklch(0.665 0.196 25)' : 'oklch(0.72 0.02 250)',
-          weight: 1.8,
-          fillColor: 'oklch(0.26 0.015 250)',
-          fillOpacity: 0.92,
+          radius: radius + 7,
+          color: 'oklch(0.665 0.196 25)',
+          weight: 2,
+          fill: false,
+          className: 'area-alarm',
+          interactive: false,
+        }).addTo(group);
+      }
+
+      L.circleMarker([p.lat, p.lng], {
+        radius,
+        color: l.blocked > 0 ? 'oklch(0.665 0.196 25)' : 'oklch(0.72 0.02 250)',
+        weight: 1.8,
+        fillColor: 'oklch(0.26 0.015 250)',
+        fillOpacity: 0.92,
+      })
+        .bindTooltip(
+          `<b>${area}</b><br>${l.total} job${l.total === 1 ? '' : 's'}` +
+            (l.blocked > 0 ? `<br><span style="color:#ff8a80">${l.blocked} cannot be done</span>` : ''),
+          { direction: 'top' },
+        )
+        .addTo(group);
+
+      L.marker([p.lat, p.lng], {
+        interactive: false,
+        icon: L.divIcon({
+          className: 'area-label',
+          html: `<span>${area}</span><b>${l.total}</b>`,
+          iconSize: [0, 0],
+        }),
+      }).addTo(group);
+    });
+
+    // Why a blocked job was out of reach: who holds the skill, and how far
+    // away they were when its window opened.
+    if (blockedJob) {
+      const target = point(blockedJob.area);
+      for (const reach of reaches) {
+        const origin = point(reach.fromArea);
+        if (origin.lat === target.lat && origin.lng === target.lng) continue;
+        L.polyline(arcBetween(origin, target, 0.08), {
+          color: reach.ok ? 'oklch(0.655 0.088 158)' : 'oklch(0.665 0.196 25)',
+          weight: 2,
+          opacity: 0.85,
+          dashArray: '5 6',
+          className: 'reach-line',
         })
           .bindTooltip(
-            `<b>${area}</b><br>${l.total} job${l.total === 1 ? '' : 's'}` +
-              (l.blocked > 0 ? `<br><span style="color:#ff8a80">${l.blocked} cannot be done</span>` : ''),
-            { direction: 'top' },
+            `<b>${reach.tech.name}</b><br>${reach.fromArea} → ${blockedJob.area}<br>` +
+              `${formatDuration(reach.travelMin)} away, earliest arrival ` +
+              `${formatTime(reach.earliestArrival)}<br>` +
+              (reach.ok ? 'could take it' : `<b>${reach.rule}</b>: ${reach.detail ?? ''}`),
+            { sticky: true },
           )
           .addTo(group);
+      }
+    }
 
-        L.marker([p.lat, p.lng], {
-          interactive: false,
-          icon: L.divIcon({
-            className: 'area-label',
-            html: `<span>${area}</span><b>${l.total}</b>`,
-            iconSize: [0, 0],
-          }),
-        }).addTo(group);
-      });
+    // Where the selected job is.
+    const selected = selectedJobId ? plan.jobs[selectedJobId] : undefined;
+    if (selected) {
+      const p = point(selected.area);
+      L.circleMarker([p.lat, p.lng], {
+        radius: 22,
+        color: 'oklch(0.95 0.005 250)',
+        weight: 2.5,
+        fill: false,
+        className: 'area-selected',
+        interactive: false,
+      }).addTo(group);
+    }
 
-      // The path already walked by whoever is being followed.
-      if (followId && trail.length > 1) {
-        const route = routes.find((r) => r.techId === followId);
-        L.polyline(trail, {
+    // A selection redraw can add SVG paths after a technician dot. Restore the
+    // live dots to the top without recreating them.
+    for (const { dot } of fleetLayers.current.values()) dot.bringToFront();
+  }, [
+    ready, day, plan, routes, selectedJobId, onHighlightTech, blockedJob, reaches, worst, maxLeg,
+  ]);
+
+  // Frame a case when its geography changes, never when its clock changes.
+  useEffect(() => {
+    if (!ready) return;
+    const L = leafletRef.current;
+    const map = mapRef.current;
+    if (!L || !map) return;
+
+    const bounds = L.latLngBounds(day.areas.map((area, i) => {
+      const p = areaLatLng(area, i, day.areas.length);
+      return [p.lat, p.lng] as [number, number];
+    }));
+    if (!bounds.isValid()) return;
+
+    map.invalidateSize();
+    map.fitBounds(bounds, { padding: [48, 48], maxZoom: 13, animate: false });
+  }, [ready, day]);
+
+  // ---- Update playback without rebuilding the map. ---------------------
+  useEffect(() => {
+    if (!ready) return;
+    const L = leafletRef.current;
+    const group = playbackLayersRef.current;
+    if (!L || !group) return;
+
+    const point = (area: string) => areaLatLng(area);
+
+    if (followId && trail.length > 1) {
+      const route = routes.find((candidate) => candidate.techId === followId);
+      if (trailLayer.current) {
+        trailLayer.current.setLatLngs(trail);
+        trailLayer.current.setStyle({ color: route?.colour ?? 'oklch(0.95 0.005 250)' });
+      } else {
+        trailLayer.current = L.polyline(trail, {
           color: route?.colour ?? 'oklch(0.95 0.005 250)',
           weight: 5,
           opacity: 0.95,
@@ -330,103 +439,72 @@ export function CityMap({
           className: 'follow-trail',
         }).addTo(group);
       }
+    } else if (trailLayer.current) {
+      group.removeLayer(trailLayer.current);
+      trailLayer.current = null;
+    }
 
-      // Where everyone is, if the clock is set.
-      for (const { tech, position } of fleet) {
-        // While following one technician, the others stay out of the way.
-        if (followId && tech.id !== followId) continue;
-        if (position.kind === 'off') continue;
-        const route = routes.find((r) => r.techId === tech.id);
-        const colour = route?.colour ?? 'oklch(0.72 0.02 250)';
+    const visible = new Set<string>();
+    for (const { tech, position } of fleet) {
+      if ((followId && tech.id !== followId) || position.kind === 'off') continue;
+      visible.add(tech.id);
 
-        let where: LatLng;
-        if (position.kind === 'at') {
-          where = point(position.area);
-        } else {
-          // Along the same arc the leg is drawn on, so the marker tracks the line.
-          const arc = arcBetween(point(position.from), point(position.to));
-          const i = Math.min(arc.length - 1, Math.max(0, Math.round(position.t * (arc.length - 1))));
-          where = { lat: arc[i][0], lng: arc[i][1] };
-        }
+      const route = routes.find((candidate) => candidate.techId === tech.id);
+      const colour = route?.colour ?? 'oklch(0.72 0.02 250)';
+      const where: LatLng = position.kind === 'at'
+        ? point(position.area)
+        : pointAlongArc(point(position.from), point(position.to), position.t);
+      const driving = position.kind === 'between';
+      const working = position.kind === 'at' && position.doing === 'working';
+      const existing = fleetLayers.current.get(tech.id);
 
-        const driving = position.kind === 'between';
-        const working = position.kind === 'at' && position.doing === 'working';
-
-        L.circleMarker([where.lat, where.lng], {
-          radius: working ? 9 : 7,
-          color: 'oklch(0.16 0.02 250)',
-          weight: 2,
-          fillColor: colour,
-          fillOpacity: driving ? 0.75 : 1,
-          className: driving ? 'fleet-driving' : undefined,
-        })
-          .bindTooltip(position.label, { direction: 'top' })
-          .addTo(group);
-
-        L.marker([where.lat, where.lng], {
-          interactive: false,
-          icon: L.divIcon({
+      if (existing) {
+        existing.dot.setLatLng([where.lat, where.lng]);
+        existing.dot.setRadius(working ? 9 : 7);
+        existing.dot.setStyle({ fillColor: colour, fillOpacity: driving ? 0.75 : 1 });
+        existing.dot.setTooltipContent(position.label);
+        existing.dot.getElement()?.classList.toggle('fleet-driving', driving);
+        existing.label.setLatLng([where.lat, where.lng]);
+        if (existing.name !== tech.name) {
+          existing.label.setIcon(L.divIcon({
             className: 'fleet-label',
             html: `<span>${tech.name}</span>`,
             iconSize: [0, 0],
-          }),
-        }).addTo(group);
-      }
-
-      // Why a blocked job was out of reach: who holds the skill, and how far
-      // away they were when its window opened.
-      if (blockedJob) {
-        const target = point(blockedJob.area);
-        for (const reach of reaches) {
-          const origin = point(reach.fromArea);
-          if (origin.lat === target.lat && origin.lng === target.lng) continue;
-          L.polyline(arcBetween(origin, target, 0.08), {
-            color: reach.ok ? 'oklch(0.655 0.088 158)' : 'oklch(0.665 0.196 25)',
-            weight: 2,
-            opacity: 0.85,
-            dashArray: '5 6',
-            className: 'reach-line',
-          })
-            .bindTooltip(
-              `<b>${reach.tech.name}</b><br>${reach.fromArea} → ${blockedJob.area}<br>` +
-                `${formatDuration(reach.travelMin)} away, earliest arrival ` +
-                `${formatTime(reach.earliestArrival)}<br>` +
-                (reach.ok ? 'could take it' : `<b>${reach.rule}</b>: ${reach.detail ?? ''}`),
-              { sticky: true },
-            )
-            .addTo(group);
+          }));
+          existing.name = tech.name;
         }
+        existing.dot.bringToFront();
+        continue;
       }
 
-      // Where the selected job is.
-      const selected = selectedJobId ? plan.jobs[selectedJobId] : undefined;
-      if (selected) {
-        const p = point(selected.area);
-        L.circleMarker([p.lat, p.lng], {
-          radius: 22,
-          color: 'oklch(0.95 0.005 250)',
-          weight: 2.5,
-          fill: false,
-          className: 'area-selected',
-          interactive: false,
-        }).addTo(group);
-      }
+      const dot = L.circleMarker([where.lat, where.lng], {
+        radius: working ? 9 : 7,
+        color: 'oklch(0.16 0.02 250)',
+        weight: 2,
+        fillColor: colour,
+        fillOpacity: driving ? 0.75 : 1,
+        className: driving ? 'fleet-driving' : undefined,
+      })
+        .bindTooltip(position.label, { direction: 'top' })
+        .addTo(group);
+      const label = L.marker([where.lat, where.lng], {
+        interactive: false,
+        icon: L.divIcon({
+          className: 'fleet-label',
+          html: `<span>${tech.name}</span>`,
+          iconSize: [0, 0],
+        }),
+      }).addTo(group);
+      fleetLayers.current.set(tech.id, { dot, label, name: tech.name });
+    }
 
-      // Frame the areas this case actually uses.
-      const bounds = L.latLngBounds(day.areas.map((a, i) => {
-        const p = point(a, i);
-        return [p.lat, p.lng] as [number, number];
-      }));
-      if (bounds.isValid()) map.fitBounds(bounds, { padding: [48, 48], maxZoom: 13 });
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    ready, day, plan, routes, selectedJobId, onHighlightTech, fleet, blockedJob, reaches,
-    worst, maxLeg, followId, trail,
-  ]);
+    for (const [techId, layers] of fleetLayers.current) {
+      if (visible.has(techId)) continue;
+      group.removeLayer(layers.dot);
+      group.removeLayer(layers.label);
+      fleetLayers.current.delete(techId);
+    }
+  }, [ready, fleet, followId, routes, trail]);
 
   // Keep whoever is being followed on screen.
   useEffect(() => {
@@ -435,13 +513,12 @@ export function CityMap({
       followNow.kind === 'at'
         ? areaLatLng(followNow.area)
         : followNow.kind === 'between'
-          ? (() => {
-              const arc = arcBetween(areaLatLng(followNow.from), areaLatLng(followNow.to));
-              const i = Math.min(arc.length - 1, Math.round(followNow.t * (arc.length - 1)));
-              return { lat: arc[i][0], lng: arc[i][1] };
-            })()
+          ? pointAlongArc(areaLatLng(followNow.from), areaLatLng(followNow.to), followNow.t)
           : null;
-    if (where) mapRef.current.panTo([where.lat, where.lng], { animate: true, duration: 0.4 });
+    // The marker itself is already updated every animation frame. An immediate
+    // camera update keeps it centred without starting a 400 ms pan that the
+    // next frame would interrupt.
+    if (where) mapRef.current.panTo([where.lat, where.lng], { animate: false });
   }, [followId, followNow]);
 
   // ---- Highlight without redrawing. ------------------------------------
@@ -525,8 +602,8 @@ export function CityMap({
           type="range"
           min={dayStart}
           max={dayEnd}
-          step={5}
-          value={clock ?? dayStart}
+          step={1}
+          value={clock === null ? dayStart : Math.round(clock)}
           onChange={(e) => {
             setPlaying(false);
             setClock(Number(e.target.value));

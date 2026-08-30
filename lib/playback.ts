@@ -108,6 +108,9 @@ export function positionAt(tech: Technician, plan: Plan, minutes: number): Posit
         label: `${tech.name} is driving home to ${tech.homeArea}`,
       };
     }
+    // Once that final leg is complete, they are at home — do not snap them
+    // back to the last customer's area for the remainder of their shift.
+    if (home > 0) area = tech.homeArea;
   }
 
   return {

@@ -78,6 +78,28 @@ export function arcBetween(a: LatLng, b: LatLng, bow = 0.14, steps = 24): [numbe
   return points;
 }
 
+/** One exact point on the same quadratic curve returned by `arcBetween`. */
+export function pointAlongArc(a: LatLng, b: LatLng, t: number, bow = 0.14): LatLng {
+  const progress = Math.min(1, Math.max(0, t));
+  const remaining = 1 - progress;
+  const mid = { lat: (a.lat + b.lat) / 2, lng: (a.lng + b.lng) / 2 };
+  const control = {
+    lat: mid.lat - (b.lng - a.lng) * bow,
+    lng: mid.lng + (b.lat - a.lat) * bow,
+  };
+
+  return {
+    lat:
+      remaining * remaining * a.lat +
+      2 * remaining * progress * control.lat +
+      progress * progress * b.lat,
+    lng:
+      remaining * remaining * a.lng +
+      2 * remaining * progress * control.lng +
+      progress * progress * b.lng,
+  };
+}
+
 /**
  * One hue per technician, evenly spaced and kept clear of the alarm red so a
  * route can never be mistaken for a rule violation.

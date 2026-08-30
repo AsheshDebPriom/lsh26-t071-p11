@@ -157,6 +157,28 @@ test('the return-home leg is only walked when the rule is on', () => {
   assert.ok(drivesHome, 'with the rule on, someone should be driving home');
 });
 
+test('a technician stays at home after completing the required return leg', () => {
+  const homePlan = solveCase(CRAFTED_DAY, { requireReturnHome: true }).plan;
+  let checked = 0;
+
+  for (const tech of CRAFTED_DAY.technicians) {
+    const route = homePlan.routes[tech.id] ?? [];
+    if (route.length === 0) continue;
+    const last = route[route.length - 1];
+    const lastArea = homePlan.jobs[last.jobId].area;
+    const homeTravel = travelMinutes(homePlan.travel, lastArea, tech.homeArea);
+    if (homeTravel === 0) continue;
+
+    const arrived = positionAt(tech, homePlan, last.finish + homeTravel);
+    assert.equal(arrived.kind, 'at', `${tech.name} should be at home after the drive`);
+    if (arrived.kind !== 'at') continue;
+    assert.equal(arrived.area, tech.homeArea, `${tech.name} must not snap back to ${lastArea}`);
+    checked++;
+  }
+
+  assert.ok(checked > 0, 'the case should include a real return-home leg');
+});
+
 // ---- Why a blocked job was out of reach --------------------------------
 
 test('reach lists only technicians who hold the skill, nearest first', () => {

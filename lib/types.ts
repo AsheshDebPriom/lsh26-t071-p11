@@ -175,7 +175,7 @@ export interface DayCase {
   /** The scripted manual move published with the case, for requirement 4. */
   manualMove?: { jobId: string; toTechnicianId: string };
   /** Where this case came from, shown on screen so nothing is passed off as ours. */
-  source: 'published' | 'crafted';
+  source: 'published' | 'crafted' | 'imported';
   /** Rule policy this case is authored against. See RuleOptions. */
   defaultRules?: RuleOptions;
   note?: string;

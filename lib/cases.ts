@@ -1,4 +1,5 @@
 import published from '../data/P11_route_shift_public.json';
+import type { RawCase, RawFile, RawJob, RawTechnician } from './caseFile';
 import { CRAFTED_DAY } from './seed';
 import { parseHM } from './time';
 import type { DayCase, Job, Technician, TravelMatrix } from './types';
@@ -12,41 +13,6 @@ import type { DayCase, Job, Technician, TravelMatrix } from './types';
  * Times arrive as "HH:MM" strings and are parsed once, here, into the integer
  * minutes the rest of the codebase works in.
  */
-
-interface RawTechnician {
-  id: string;
-  name: string;
-  skills: string[];
-  shift_start: string;
-  shift_end: string;
-  home_area: string;
-}
-
-interface RawJob {
-  id: string;
-  area: string;
-  skill: string;
-  duration_minutes: number;
-  window_start: string;
-  window_end: string;
-}
-
-interface RawCase {
-  case_id: string;
-  today: string;
-  areas: string[];
-  travel_minutes: Record<string, Record<string, number>>;
-  technicians: RawTechnician[];
-  jobs: RawJob[];
-  manual_move?: { job_id: string; to_technician: string };
-}
-
-interface RawFile {
-  schema_version: string;
-  problem_id: string;
-  format_note: string;
-  cases: RawCase[];
-}
 
 const file = published as unknown as RawFile;
 
@@ -73,7 +39,7 @@ function toJob(raw: RawJob): Job {
     code: jobCode(raw.id),
     // The published cases carry no customer names; the area and code are the
     // dispatcher's handle on the job, so the board shows those.
-    customer: `${raw.area} call`,
+    customer: raw.customer ?? `${raw.area} call`,
     area: raw.area,
     skill: raw.skill,
     durationMin: raw.duration_minutes,
@@ -82,11 +48,18 @@ function toJob(raw: RawJob): Job {
   };
 }
 
-function toCase(raw: RawCase): DayCase {
+/**
+ * The one conversion from the published JSON shape into the app's model.
+ *
+ * Cases you write yourself go through exactly this function, so a day you
+ * author behaves identically to one the organisers shipped — there is no
+ * second, looser path for imported data.
+ */
+export function caseFromRaw(raw: RawCase, source: DayCase['source'] = 'published'): DayCase {
   return {
     id: raw.case_id,
-    label: raw.case_id,
-    today: raw.today,
+    label: source === 'imported' ? `${raw.case_id} (yours)` : raw.case_id,
+    today: raw.today ?? '',
     areas: [...raw.areas],
     travel: raw.travel_minutes as TravelMatrix,
     technicians: raw.technicians.map(toTechnician),
@@ -94,9 +67,11 @@ function toCase(raw: RawCase): DayCase {
     manualMove: raw.manual_move
       ? { jobId: raw.manual_move.job_id, toTechnicianId: raw.manual_move.to_technician }
       : undefined,
-    source: 'published',
+    source,
   };
 }
+
+const toCase = (raw: RawCase): DayCase => caseFromRaw(raw, 'published');
 
 export const PUBLISHED_CASES: DayCase[] = file.cases.map(toCase);
 

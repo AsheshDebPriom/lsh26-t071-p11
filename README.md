@@ -84,6 +84,53 @@ All four required items were working before any of these were started.
   anything by hand, the header shows jobs, travel and score against the plan the
   solver built, with a button to restore it.
 
+## Using your own technicians and jobs
+
+Press **Build a day…** in the header. You can:
+
+- **Start from a template** — a small valid day you can edit in place.
+- **Copy any case in to edit** — loads the day you are looking at into the
+  editor so you can change names, shifts, areas or the travel table.
+- **Download it as JSON**, edit it in your own editor, and open the file again.
+- **Paste** a case straight in.
+
+The format is exactly the one the participant pack ships (`schema_version`
+2.1), so a day you write here would load into any other P11 implementation, and
+theirs would load into this one. There is no private format.
+
+Your days are validated hard before anything is loaded — every problem is
+reported at once, with the field path — and they are kept in your browser, so
+they survive a reload. **Forget my days** clears them.
+
+```jsonc
+{
+  "case_id": "MY-DAY-01",
+  "today": "2026-08-30",
+  "areas": ["Gulshan", "Motijheel", "Mirpur"],
+  "travel_minutes": {                      // symmetric, 0 on the diagonal
+    "Gulshan":   { "Gulshan": 0,  "Motijheel": 45, "Mirpur": 35 },
+    "Motijheel": { "Gulshan": 45, "Motijheel": 0,  "Mirpur": 60 },
+    "Mirpur":    { "Gulshan": 35, "Motijheel": 60, "Mirpur": 0  }
+  },
+  "technicians": [
+    { "id": "T01", "name": "Rafiq", "skills": ["ac", "plumbing"],
+      "shift_start": "09:00", "shift_end": "18:00", "home_area": "Gulshan" }
+  ],
+  "jobs": [
+    { "id": "J01", "area": "Mirpur", "skill": "ac",
+      "duration_minutes": 60, "window_start": "10:00", "window_end": "13:00" }
+  ],
+  "manual_move": { "job_id": "J01", "to_technician": "T01" }  // optional
+}
+```
+
+A job whose skill nobody on the roster holds is allowed on purpose — it is how
+you make a job the plan *must* refuse. You get a warning, not an error.
+
+To ship a day with the app rather than load it at runtime, add it to
+`lib/seed.ts` the way `CRAFTED_DAY` is written and export it from `CASES` in
+`lib/cases.ts`.
+
 ## How to run it
 
 ```bash
@@ -92,7 +139,7 @@ npm run dev     # http://localhost:3000
 ```
 
 ```bash
-npm test        # 77 tests: one per hard rule, all 25 published cases, the board markup
+npm test        # 98 tests: one per hard rule, all 25 published cases, the board markup
 npm run stats   # the better-than-random evidence table, case by case
 npm run build   # production build
 npm run lint
@@ -385,8 +432,9 @@ matters on a dense board and in a screenshot.
 - **Manual moves are not undoable.** Re-solve rebuilds the plan from scratch.
 - **Laptop and up.** Responsive down to a laptop screen as required; the board
   scrolls horizontally below about 900px and is not designed for a phone.
-- **No persistence, no authentication, no multi-user.** Deliberate: the brief
-  asked for a dispatch board, not a product.
+- **No authentication and no multi-user.** Deliberate: the brief asked for a
+  dispatch board, not a product. The only thing stored is any day you write
+  yourself, kept in your own browser — nothing is sent anywhere.
 - **The basemap key is public by nature.** A browser map key is sent to the tile
   service by the visitor's own browser, so it is inlined into the client bundle
   and cannot be hidden — that is true of every web map, not a shortcut taken
@@ -435,11 +483,12 @@ lib/
   score.ts        the plan score used to compare a hand-edited day
   moves.ts        previewMoves — the one verdict behind the drag and the dropdown
   console.ts      the command grammar: parse text, answer questions
+  caseFile.ts     read, validate and write days in the published JSON format
   palette.ts      per-case skill colour assignment
-  *.test.ts       77 tests
+  *.test.ts       98 tests
 components/board/ the header, the lanes, the city map, the blocked panel,
                   the legend, the move control, the emergency form,
-                  the console
+                  the console, the case loader
 scripts/stats.ts  the better-than-random evidence table
 ```
 

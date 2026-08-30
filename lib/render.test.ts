@@ -159,6 +159,8 @@ test('the header states what the tool is, the goal, and where the data came from
       onRestore: noop,
       view: 'timeline' as const,
       onView: noop,
+      onOpenLoader: noop,
+      customCount: 0,
     }),
   );
 

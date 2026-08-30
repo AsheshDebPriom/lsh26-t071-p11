@@ -36,13 +36,15 @@ interface Props {
   onRestore: () => void;
   view: BoardView;
   onView: (v: BoardView) => void;
+  onOpenLoader: () => void;
+  customCount: number;
 }
 
 export function Header(props: Props) {
   const {
     day, cases, onPickCase, rules, onToggleReturnHome, onGenerate, onReset,
     solving, hasPlan, plan, stats, baseline, score, generatedScore, edited, onRestore,
-    view, onView,
+    view, onView, onOpenLoader, customCount,
   } = props;
 
   const savedPct =
@@ -86,6 +88,17 @@ export function Header(props: Props) {
               </option>
             ))}
           </select>
+        </Field>
+
+        <Field label={customCount > 0 ? `Your days (${customCount})` : 'Your own data'}>
+          <button
+            type="button"
+            onClick={onOpenLoader}
+            title="Write your own technicians, jobs, areas and travel table"
+            className="rounded-md border border-hairline bg-panel-2 px-3 py-1.5 text-[12.5px] text-foreground transition-colors hover:border-ring"
+          >
+            Build a day…
+          </button>
         </Field>
 
         <Field label="Plan">
@@ -155,11 +168,17 @@ export function Header(props: Props) {
           {day.source === 'published' ? (
             <>
               Published case <span className="num text-foreground">{day.id}</span> from the P11
-              participant pack · <span className="num">{day.today}</span>
+              participant pack{day.today && <> · <span className="num">{day.today}</span></>}
+            </>
+          ) : day.source === 'imported' ? (
+            <>
+              <span className="text-foreground">Your own day</span> —{' '}
+              <span className="num">{day.id}</span>, loaded in this browser
+              {day.today && <> · <span className="num">{day.today}</span></>}
             </>
           ) : (
             <>
-              {day.label} · invented data · <span className="num">{day.today}</span>
+              {day.label} · invented data{day.today && <> · <span className="num">{day.today}</span></>}
             </>
           )}
         </p>

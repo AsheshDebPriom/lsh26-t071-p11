@@ -32,8 +32,8 @@
       "id": "AT1",
       "requirement": "At least 12 technicians with skills, shift start and end times and a home area; at least 30 jobs with an area, a required skill, a duration and a customer time window.",
       "status": "complete",
-      "where": "data/P11_route_shift_public.json via lib/cases.ts; lib/seed.ts",
-      "evidence": "26 selectable days. Published cases carry 12-16 technicians and 30-40 jobs each. Test: 'every case meets the stated minimums'."
+      "where": "data/P11_route_shift_public.json via lib/cases.ts; lib/seed.ts; lib/caseFile.ts for days written by the user",
+      "evidence": "26 selectable days. Published cases carry 12-16 technicians and 30-40 jobs each. Test: 'every case meets the stated minimums'. A day can also be written by hand: the app imports and exports the same schema 2.1 JSON, validated field by field before anything loads."
     },
     {
       "id": "AT2",
@@ -121,7 +121,7 @@
     }
   ],
   "verification": {
-    "tests": "npm test — 77 tests, covering one case per hard rule, all 25 published cases, route legality, timeline contiguity, blocked-list coverage, the better-than-random claim, server-rendered board markup, and all three bonus features",
+    "tests": "npm test — 98 tests, covering one case per hard rule, all 25 published cases, route legality, timeline contiguity, blocked-list coverage, the better-than-random claim, server-rendered board markup, and all three bonus features",
     "lint": "npm run lint — clean",
     "build": "npm run build — clean",
     "stats": "npm run stats — per-case optimised vs random comparison"

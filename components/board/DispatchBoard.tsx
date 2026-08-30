@@ -14,7 +14,8 @@ import {
 import { AnimatePresence, LayoutGroup, motion } from 'framer-motion';
 import { useCallback, useMemo, useState } from 'react';
 
-import { CASES, DEFAULT_CASE_ID, caseWindow, findCase } from '@/lib/cases';
+import { caseFromRaw, CASES, DEFAULT_CASE_ID, caseWindow, findCase } from '@/lib/cases';
+import { parseCaseFile, type RawCase } from '@/lib/caseFile';
 import { answer, parseCommand } from '@/lib/console';
 import {
   applyPlacement,
@@ -35,6 +36,7 @@ import type { DayCase, Job, Plan, RuleName, RuleOptions } from '@/lib/types';
 import { DEFAULT_RULES, skillLabel } from '@/lib/types';
 
 import { BlockedPanel } from './BlockedPanel';
+import { CaseLoader } from './CaseLoader';
 import { CityMap } from './CityMap';
 import { Console, type ConsoleLine } from './Console';
 import { EmergencyForm } from './EmergencyForm';
@@ -51,9 +53,37 @@ type Notice =
   | { kind: 'emergency'; jobCode: string; placed: boolean; untouched: number; stranded: number }
   | { kind: 'unassigned'; jobCode: string; techName: string };
 
+const STORE_KEY = 'p11.custom-cases.v1';
+
+/** Days the dispatcher wrote themselves, kept in this browser between visits. */
+function loadStoredCases(): RawCase[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(STORE_KEY);
+    if (!raw) return [];
+    // Re-validated on the way in: something stale or hand-edited must not be
+    // able to put a malformed day on the board.
+    const parsed = parseCaseFile(raw);
+    return parsed.ok ? parsed.cases : [];
+  } catch {
+    return [];
+  }
+}
+
 export function DispatchBoard() {
+  const [customRaw, setCustomRaw] = useState<RawCase[]>(loadStoredCases);
+  const customCases = useMemo(
+    () => customRaw.map((c) => caseFromRaw(c, 'imported')),
+    [customRaw],
+  );
+  const allCases = useMemo(() => [...customCases, ...CASES], [customCases]);
+
   const [caseId, setCaseId] = useState<string>(DEFAULT_CASE_ID);
-  const day = useMemo(() => findCase(caseId), [caseId]);
+  const day = useMemo(
+    () => allCases.find((c) => c.id === caseId) ?? findCase(caseId),
+    [allCases, caseId],
+  );
+  const [loaderOpen, setLoaderOpen] = useState(false);
 
   const [rules, setRules] = useState<RuleOptions>(day.defaultRules ?? DEFAULT_RULES);
   const [plan, setPlan] = useState<Plan | null>(null);
@@ -114,6 +144,49 @@ export function DispatchBoard() {
     setView('timeline');
   }, []);
 
+  const importCases = useCallback(
+    (incoming: RawCase[]) => {
+      setCustomRaw((prev) => {
+        // A re-import of the same case id replaces it rather than duplicating.
+        const byId = new Map(prev.map((c) => [c.case_id, c]));
+        for (const c of incoming) byId.set(c.case_id, c);
+        const next = [...byId.values()];
+        try {
+          window.localStorage.setItem(
+            STORE_KEY,
+            JSON.stringify({ schema_version: '2.1', problem_id: 'P11', cases: next }),
+          );
+        } catch {
+          // A full or blocked store is not a reason to refuse the import; the
+          // day still loads, it just will not survive a reload.
+        }
+        return next;
+      });
+      const first = incoming[0];
+      if (first) {
+        setCaseId(first.case_id);
+        reset();
+      }
+      setLoaderOpen(false);
+    },
+    // `reset` is declared below and is stable; see the callback list there.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  const forgetCustomCases = useCallback(() => {
+    try {
+      window.localStorage.removeItem(STORE_KEY);
+    } catch {
+      // Nothing to do; the in-memory list is cleared either way.
+    }
+    setCustomRaw([]);
+    setCaseId(DEFAULT_CASE_ID);
+    reset();
+    setLoaderOpen(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const say = useCallback((text: string, tone: ConsoleLine['tone'] = 'info') => {
     setConsoleLines((prev) => [...prev, { id: prev.length + 1, role: 'board', text, tone }]);
   }, []);
@@ -121,10 +194,11 @@ export function DispatchBoard() {
   const pickCase = useCallback(
     (id: string) => {
       setCaseId(id);
-      setRules(findCase(id).defaultRules ?? DEFAULT_RULES);
+      const picked = allCases.find((c) => c.id === id) ?? findCase(id);
+      setRules(picked.defaultRules ?? DEFAULT_RULES);
       reset();
     },
-    [reset],
+    [reset, allCases],
   );
 
   const toggleReturnHome = useCallback(
@@ -345,7 +419,7 @@ export function DispatchBoard() {
     (text: string) => {
       setConsoleLines((prev) => [...prev, { id: prev.length + 1, role: 'you', text }]);
 
-      const ctx = { day, plan, caseIds: CASES.map((c) => c.id) };
+      const ctx = { day, plan, caseIds: allCases.map((c) => c.id) };
       const command = parseCommand(text, ctx);
 
       const spoken = answer(command, ctx);
@@ -458,7 +532,7 @@ export function DispatchBoard() {
     },
     [
       day, plan, generated, sick, say, generate, reset, restoreGenerated, pickCase,
-      toggleReturnHome, move, unassign, markSick, raiseEmergency,
+      toggleReturnHome, move, unassign, markSick, raiseEmergency, allCases,
     ],
   );
 
@@ -473,7 +547,9 @@ export function DispatchBoard() {
     <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-background">
       <Header
         day={day}
-        cases={CASES}
+        cases={allCases}
+        onOpenLoader={() => setLoaderOpen(true)}
+        customCount={customCases.length}
         onPickCase={pickCase}
         rules={rules}
         onToggleReturnHome={toggleReturnHome}
@@ -596,6 +672,15 @@ export function DispatchBoard() {
         </div>
       )}
     </div>
+
+      <CaseLoader
+        open={loaderOpen}
+        onOpenChange={setLoaderOpen}
+        currentCase={day}
+        onLoad={importCases}
+        customCount={customCases.length}
+        onForget={forgetCustomCases}
+      />
 
       <Console
         open={consoleOpen}

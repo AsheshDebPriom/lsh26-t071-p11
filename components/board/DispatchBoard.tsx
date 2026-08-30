@@ -731,7 +731,6 @@ export function DispatchBoard() {
                 highlightTechId={highlightTechId}
                 onHighlightTech={setHighlightTechId}
                 selectedJobId={selectedJobId}
-                onSelectJob={setSelectedJobId}
                 dayStart={boardWindow.start}
                 dayEnd={boardWindow.end}
               />
@@ -766,6 +765,10 @@ export function DispatchBoard() {
         lines={consoleLines}
         thinking={consoleThinking}
         onSubmit={runCommand}
+        onReset={() => {
+          setConsoleLines([]);
+          setConsoleThinking(false);
+        }}
         caseLabel={day.label}
       />
 
@@ -1152,7 +1155,6 @@ function EmptyState({
           highlightTechId={null}
           onHighlightTech={() => {}}
           selectedJobId={null}
-          onSelectJob={() => {}}
           dayStart={previewWindow.start}
           dayEnd={previewWindow.end}
         />

@@ -34,10 +34,11 @@ interface Props {
   lines: ConsoleLine[];
   thinking: boolean;
   onSubmit: (text: string) => void;
+  onReset: () => void;
   caseLabel: string;
 }
 
-export function Console({ open, onOpenChange, lines, thinking, onSubmit, caseLabel }: Props) {
+export function Console({ open, onOpenChange, lines, thinking, onSubmit, onReset, caseLabel }: Props) {
   const [draft, setDraft] = useState('');
   const inputRef = useRef<HTMLInputElement | null>(null);
   const logRef = useRef<HTMLDivElement | null>(null);
@@ -114,14 +115,30 @@ export function Console({ open, onOpenChange, lines, thinking, onSubmit, caseLab
               <Cursor />
               <span className="text-[13px] font-semibold text-foreground">Ask the board</span>
               <span className="num text-[11px] text-muted-foreground">{caseLabel}</span>
-              <button
-                type="button"
-                onClick={() => onOpenChange(false)}
-                className="ml-auto rounded px-1.5 text-[16px] leading-none text-muted-foreground hover:text-foreground"
-                aria-label="Close the console"
-              >
-                ×
-              </button>
+              <span className="ml-auto flex items-center gap-1">
+                {lines.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onReset();
+                      setDraft('');
+                      inputRef.current?.focus();
+                    }}
+                    title="Clear this conversation and start again"
+                    className="rounded-md border border-hairline px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:border-ring hover:text-foreground"
+                  >
+                    Reset
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => onOpenChange(false)}
+                  className="rounded px-1.5 text-[16px] leading-none text-muted-foreground hover:text-foreground"
+                  aria-label="Close the console"
+                >
+                  ×
+                </button>
+              </span>
             </header>
 
             <div ref={logRef} className="scroll-thin min-h-0 flex-1 space-y-2.5 overflow-y-auto px-3.5 py-3">

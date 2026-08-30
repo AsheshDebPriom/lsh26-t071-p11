@@ -50,6 +50,10 @@ Open the live URL and press **Build day plan**.
     or part way along a leg — with a running count of who is working, driving,
     waiting and off shift. This is the only view that shows technicians *passing
     each other*, which is the failure the brief describes.
+  - **One technician's whole day.** Press a name under the map and their day
+    plays out: the marker travels their route minute by minute, a trail draws in
+    behind them, the map follows, everyone else fades back, and a caption says
+    what they are doing right now. Speed runs 1×, 2× or 5×.
   - **Why a job was impossible.** Select a blocked job and the map draws every
     technician who holds the skill, where they were when the window opened, and
     how far away that was. The blocked panel gives you the rule; this gives you
@@ -104,13 +108,26 @@ All four required items were working before any of these were started.
 
 ## Using your own technicians and jobs
 
-Press **Build a day…** in the header. You can:
+Press **Build a day…** in the header. There are two ways in.
 
-- **Start from a template** — a small valid day you can edit in place.
-- **Copy any case in to edit** — loads the day you are looking at into the
-  editor so you can change names, shifts, areas or the travel table.
-- **Download it as JSON**, edit it in your own editor, and open the file again.
-- **Paste** a case straight in.
+**Build it** — a form, no JSON. Add areas as chips, fill the travel table as a
+grid, and add technicians and jobs as rows with real inputs: time pickers for
+shifts and windows, a dropdown for areas, toggles for skills. Every edit keeps
+the case consistent, which is the whole reason not to hand-edit the file:
+
+- Rename an area and the travel table, every technician who lives there and
+  every job in it follow it.
+- Type one side of a travel leg and the other side is set with it, because the
+  table has to be symmetric.
+- Remove an area and anyone standing in it moves somewhere that still exists.
+- Ids are handed out without collisions, and a freed one comes back.
+
+Start empty, start from an example, or pull the case you are looking at into the
+form and edit it.
+
+**Paste JSON** — the same thing for anyone who would rather type the file:
+template, file open, download, paste. Both tabs write the same object and go
+through the same validator.
 
 The format is exactly the one the participant pack ships (`schema_version`
 2.1), so a day you write here would load into any other P11 implementation, and
@@ -157,7 +174,7 @@ npm run dev     # http://localhost:3000
 ```
 
 ```bash
-npm test        # 111 tests: one per hard rule, all 25 published cases, the board markup
+npm test        # 127 tests: one per hard rule, all 25 published cases, the board markup
 npm run stats   # the better-than-random evidence table, case by case
 npm run build   # production build
 npm run lint
@@ -531,11 +548,12 @@ lib/
   snapshot.ts     the day written out for a language model to read
   sharedDays.ts   publishing and fetching days via Supabase
   caseFile.ts     read, validate and write days in the published JSON format
+  caseDraft.ts    editing a day as a form, keeping it consistent as you go
   palette.ts      per-case skill colour assignment
-  *.test.ts       111 tests
+  *.test.ts       127 tests
 components/board/ the header, the lanes, the city map, the blocked panel,
                   the legend, the move control, the emergency form,
-                  the console, the case loader
+                  the console, the case loader and builder
 app/api/chat/     the only server route: the Gemini call, key-side
 utils/supabase/   browser and server Supabase clients
 supabase/         the one table's migration

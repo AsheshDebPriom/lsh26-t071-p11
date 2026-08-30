@@ -292,3 +292,13 @@
 @media (prefers-reduced-motion: reduce) {
   .reach-line, .fleet-driving { animation: none; }
 }
+
+/* The path already walked by the technician being followed. */
+.follow-trail {
+  filter: drop-shadow(0 0 6px oklch(1 0 0 / 30%));
+  stroke-linejoin: round;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .follow-trail { filter: none; }
+}

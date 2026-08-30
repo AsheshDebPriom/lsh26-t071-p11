@@ -3,6 +3,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { useEffect, useRef, useState } from 'react';
 
+import { emptyDraft, normaliseTravel } from '@/lib/caseDraft';
 import { blankCaseTemplate, parseCaseFile, serialiseCases, toRawCase, type RawCase } from '@/lib/caseFile';
 import {
   fetchSharedDay,
@@ -12,6 +13,8 @@ import {
   type SharedDay,
 } from '@/lib/sharedDays';
 import type { DayCase } from '@/lib/types';
+
+import { CaseBuilder } from './CaseBuilder';
 
 /**
  * Build your own day.
@@ -35,6 +38,8 @@ interface Props {
 export function CaseLoader({
   open, onOpenChange, currentCase, onLoad, customCount, onForget,
 }: Props) {
+  const [tab, setTab] = useState<'build' | 'json'>('build');
+  const [draft, setDraft] = useState<RawCase>(() => emptyDraft());
   const [text, setText] = useState('');
   const [errors, setErrors] = useState<string[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -61,7 +66,9 @@ export function CaseLoader({
   async function publish() {
     setBusy(true);
     setShareNote(null);
-    const parsed = parseCaseFile(text || serialiseCases([currentCase]));
+    const parsed = parseCaseFile(
+      tab === 'build' ? JSON.stringify(normaliseTravel(draft)) : text || serialiseCases([currentCase]),
+    );
     if (!parsed.ok) {
       setErrors(parsed.errors);
       setBusy(false);
@@ -88,6 +95,18 @@ export function CaseLoader({
     if (result.ok) onLoad([result.value]);
     else setShareNote(result.reason);
     setBusy(false);
+  }
+
+  /** Hand the builder's draft to the same validator a pasted file goes through. */
+  function loadDraft() {
+    load(JSON.stringify(normaliseTravel(draft)));
+  }
+
+  /** Pull a real case into the builder so it can be edited as a form. */
+  function editInBuilder(source: RawCase) {
+    setDraft(JSON.parse(JSON.stringify(source)));
+    setTab('build');
+    setErrors([]);
   }
 
   function load(source: string) {
@@ -148,7 +167,58 @@ export function CaseLoader({
             </button>
           </header>
 
+          <div className="flex shrink-0 gap-1 border-b border-hairline px-5 pt-2">
+            {(['build', 'json'] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTab(t)}
+                className="rounded-t-md border-b-2 px-3 py-1.5 text-[12.5px] transition-colors"
+                style={{
+                  borderColor: tab === t ? 'var(--skill-1)' : 'transparent',
+                  color: tab === t ? 'var(--foreground)' : 'var(--muted-foreground)',
+                }}
+              >
+                {t === 'build' ? 'Build it' : 'Paste JSON'}
+              </button>
+            ))}
+            <span className="ml-auto self-center text-[11.5px] text-muted-foreground">
+              {tab === 'build'
+                ? 'Fill in the form — no JSON needed'
+                : 'For anyone who would rather type the file'}
+            </span>
+          </div>
+
           <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-5 py-4">
+            {tab === 'build' ? (
+              <>
+                <div className="mb-4 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => editInBuilder(JSON.parse(blankCaseTemplate()).cases[0])}
+                    className="rounded-md border border-hairline bg-panel-2 px-3 py-1.5 text-[12.5px] text-foreground hover:border-ring"
+                  >
+                    Start from an example
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => editInBuilder(toRawCase(currentCase))}
+                    className="rounded-md border border-hairline bg-panel-2 px-3 py-1.5 text-[12.5px] text-foreground hover:border-ring"
+                  >
+                    Edit {currentCase.id}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDraft(emptyDraft())}
+                    className="rounded-md border border-hairline bg-panel-2 px-3 py-1.5 text-[12.5px] text-muted-foreground hover:border-ring hover:text-foreground"
+                  >
+                    Start empty
+                  </button>
+                </div>
+                <CaseBuilder draft={draft} onChange={setDraft} />
+              </>
+            ) : (
+            <>
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
@@ -238,6 +308,9 @@ export function CaseLoader({
                   ))}
                 </ul>
               </div>
+            )}
+
+            </>
             )}
 
             <section className="mt-4 rounded-md border border-hairline bg-panel-2 px-3 py-2.5">
@@ -350,8 +423,8 @@ export function CaseLoader({
               </button>
               <button
                 type="button"
-                onClick={() => load(text)}
-                disabled={!text.trim()}
+                onClick={() => (tab === 'build' ? loadDraft() : load(text))}
+                disabled={tab === 'json' && !text.trim()}
                 className="rounded-md bg-primary px-4 py-1.5 text-[12.5px] font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50"
               >
                 Load this day

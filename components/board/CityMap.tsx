@@ -4,7 +4,7 @@ import type { Map as LeafletMap, LayerGroup, Polyline } from 'leaflet';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { arcBetween, areaLatLng, type LatLng } from '@/lib/geo';
-import { describeReach, fleetAt, fleetSummary, reachFor } from '@/lib/playback';
+import { describeReach, fleetAt, fleetSummary, positionAt, reachFor } from '@/lib/playback';
 import { areaLoad, buildRoutes, longestLeg, worstLegs } from '@/lib/routes';
 import { formatDuration, formatTime } from '@/lib/time';
 import type { DayCase, Plan } from '@/lib/types';
@@ -52,14 +52,13 @@ interface Props {
   highlightTechId: string | null;
   onHighlightTech: (techId: string | null) => void;
   selectedJobId: string | null;
-  onSelectJob: (jobId: string | null) => void;
   /** The board window, so the scrubber covers the same hours as the timeline. */
   dayStart: number;
   dayEnd: number;
 }
 
 export function CityMap({
-  day, plan, highlightTechId, onHighlightTech, selectedJobId, onSelectJob, dayStart, dayEnd,
+  day, plan, highlightTechId, onHighlightTech, selectedJobId, dayStart, dayEnd,
 }: Props) {
   const holder = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<LeafletMap | null>(null);
@@ -75,6 +74,23 @@ export function CityMap({
   // The scrubber. `null` means "show the whole day at once".
   const [clock, setClock] = useState<number | null>(null);
   const [playing, setPlaying] = useState(false);
+  const [speed, setSpeed] = useState(4);
+
+  /** Following one technician through their whole day, minute by minute. */
+  const [followId, setFollowId] = useState<string | null>(null);
+  const followTech = useMemo(
+    () => day.technicians.find((t) => t.id === followId) ?? null,
+    [day, followId],
+  );
+
+  /** The window a follow runs over: from setting off to the last job finishing. */
+  const followSpan = useMemo(() => {
+    if (!followTech) return null;
+    const route = plan.routes[followTech.id] ?? [];
+    if (route.length === 0) return null;
+    const last = route[route.length - 1];
+    return { from: route[0].departure, to: Math.min(followTech.shiftEnd, last.finish + 30) };
+  }, [followTech, plan]);
 
   const fleet = useMemo(
     () => (clock === null ? [] : fleetAt(day, plan, clock)),
@@ -94,21 +110,65 @@ export function CityMap({
     [blockedJob, day, plan],
   );
 
-  // Play runs the day at roughly four minutes of the day per frame-ish.
+  // The clock advances by `speed` minutes of the day every tick. Following one
+  // technician runs over their own hours; otherwise it runs the whole board.
   useEffect(() => {
     if (!playing) return;
+    const from = followSpan?.from ?? dayStart;
+    const to = followSpan?.to ?? dayEnd;
     const id = window.setInterval(() => {
       setClock((c) => {
-        const next = (c ?? dayStart) + 4;
-        if (next >= dayEnd) {
+        const next = (c ?? from) + speed;
+        if (next >= to) {
           setPlaying(false);
-          return dayEnd;
+          return to;
         }
         return next;
       });
     }, 60);
     return () => window.clearInterval(id);
-  }, [playing, dayStart, dayEnd]);
+  }, [playing, speed, dayStart, dayEnd, followSpan]);
+
+  /** Start following a technician from the moment they set off. */
+  const follow = (techId: string) => {
+    const route = plan.routes[techId] ?? [];
+    if (route.length === 0) {
+      setFollowId(techId);
+      return;
+    }
+    setFollowId(techId);
+    setClock(route[0].departure);
+    setPlaying(true);
+  };
+
+  const stopFollowing = () => {
+    setFollowId(null);
+    setPlaying(false);
+    setClock(null);
+  };
+
+  /** The path already travelled, so the route draws itself in behind them. */
+  const trail = useMemo(() => {
+    if (!followTech || clock === null) return [];
+    const from = followSpan?.from ?? followTech.shiftStart;
+    const points: [number, number][] = [];
+    const step = Math.max(2, Math.round((clock - from) / 90));
+    for (let m = from; m <= clock; m += step) {
+      const at = positionAt(followTech, plan, m);
+      if (at.kind === 'off') continue;
+      if (at.kind === 'at') {
+        const p = areaLatLng(at.area);
+        points.push([p.lat, p.lng]);
+      } else {
+        const arc = arcBetween(areaLatLng(at.from), areaLatLng(at.to));
+        const i = Math.min(arc.length - 1, Math.max(0, Math.round(at.t * (arc.length - 1))));
+        points.push(arc[i]);
+      }
+    }
+    return points;
+  }, [followTech, plan, clock, followSpan]);
+
+  const followNow = followTech && clock !== null ? positionAt(followTech, plan, clock) : null;
 
   // ---- Create the map once. --------------------------------------------
   useEffect(() => {
@@ -259,8 +319,22 @@ export function CityMap({
         }).addTo(group);
       });
 
+      // The path already walked by whoever is being followed.
+      if (followId && trail.length > 1) {
+        const route = routes.find((r) => r.techId === followId);
+        L.polyline(trail, {
+          color: route?.colour ?? 'oklch(0.95 0.005 250)',
+          weight: 5,
+          opacity: 0.95,
+          lineCap: 'round',
+          className: 'follow-trail',
+        }).addTo(group);
+      }
+
       // Where everyone is, if the clock is set.
       for (const { tech, position } of fleet) {
+        // While following one technician, the others stay out of the way.
+        if (followId && tech.id !== followId) continue;
         if (position.kind === 'off') continue;
         const route = routes.find((r) => r.techId === tech.id);
         const colour = route?.colour ?? 'oklch(0.72 0.02 250)';
@@ -349,14 +423,35 @@ export function CityMap({
     return () => {
       cancelled = true;
     };
-  }, [ready, day, plan, routes, selectedJobId, onHighlightTech, fleet, blockedJob, reaches, worst, maxLeg]);
+  }, [
+    ready, day, plan, routes, selectedJobId, onHighlightTech, fleet, blockedJob, reaches,
+    worst, maxLeg, followId, trail,
+  ]);
+
+  // Keep whoever is being followed on screen.
+  useEffect(() => {
+    if (!followId || !followNow || !mapRef.current) return;
+    const where =
+      followNow.kind === 'at'
+        ? areaLatLng(followNow.area)
+        : followNow.kind === 'between'
+          ? (() => {
+              const arc = arcBetween(areaLatLng(followNow.from), areaLatLng(followNow.to));
+              const i = Math.min(arc.length - 1, Math.round(followNow.t * (arc.length - 1)));
+              return { lat: arc[i][0], lng: arc[i][1] };
+            })()
+          : null;
+    if (where) mapRef.current.panTo([where.lat, where.lng], { animate: true, duration: 0.4 });
+  }, [followId, followNow]);
 
   // ---- Highlight without redrawing. ------------------------------------
   useEffect(() => {
     if (!ready) return;
     for (const [techId, legs] of routeLayers.current) {
-      const active = highlightTechId === techId;
-      const dimmed = highlightTechId !== null && !active;
+      const active = highlightTechId === techId || followId === techId;
+      const dimmed =
+        (followId !== null && followId !== techId) ||
+        (followId === null && highlightTechId !== null && !active);
       for (const leg of legs) {
         // Keep the thickness the leg earned; only lift or fade it.
         const base = leg.options.weight ?? 3;
@@ -366,7 +461,7 @@ export function CityMap({
         });
       }
     }
-  }, [highlightTechId, ready, plan]);
+  }, [highlightTechId, followId, ready, plan]);
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
@@ -400,13 +495,31 @@ export function CityMap({
         <button
           type="button"
           onClick={() => {
-            if (clock === null) setClock(dayStart);
+            if (clock === null) setClock(followSpan?.from ?? dayStart);
             setPlaying((p) => !p);
           }}
           className="rounded-md border border-hairline px-2.5 py-1 text-[12px] text-foreground transition-colors hover:border-ring"
         >
-          {playing ? 'Pause' : 'Play the day'}
+          {playing ? 'Pause' : followTech ? `Play ${followTech.name}` : 'Play the day'}
         </button>
+
+        <span className="flex items-center gap-0.5 rounded-md border border-hairline p-0.5">
+          {[2, 4, 10].map((sp) => (
+            <button
+              key={sp}
+              type="button"
+              onClick={() => setSpeed(sp)}
+              className="num rounded-[4px] px-1.5 py-0.5 text-[11px] transition-colors"
+              style={
+                speed === sp
+                  ? { background: 'var(--primary)', color: 'var(--primary-foreground)' }
+                  : { color: 'var(--muted-foreground)' }
+              }
+            >
+              {sp === 2 ? '1×' : sp === 4 ? '2×' : '5×'}
+            </button>
+          ))}
+        </span>
 
         <input
           type="range"
@@ -426,9 +539,20 @@ export function CityMap({
           {clock === null ? '—' : formatTime(clock)}
         </span>
 
-        {clock === null ? (
+        {followTech && followNow ? (
+          <>
+            <span className="text-[11.5px] text-foreground">{followNow.label}</span>
+            <button
+              type="button"
+              onClick={stopFollowing}
+              className="text-[11.5px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            >
+              stop following
+            </button>
+          </>
+        ) : clock === null ? (
           <span className="text-[11.5px] text-muted-foreground">
-            Whole day shown. Drag to see where everyone is at a moment.
+            Whole day shown. Press a name below to watch that technician&rsquo;s day.
           </span>
         ) : (
           <>
@@ -456,6 +580,7 @@ export function CityMap({
       <div className="scroll-thin max-h-[8.5rem] shrink-0 overflow-y-auto border-t border-hairline bg-panel px-4 py-2.5">
         {worst.length > 0 && (
           <p className="mb-2 text-[11.5px] leading-snug text-muted-foreground">
+            <span className="text-foreground">Press a name to watch that day animate.</span>{' '}
             <span className="text-foreground">Thicker means costlier.</span> The three most
             expensive legs today:{' '}
             {worst.map((w, i) => (
@@ -484,14 +609,24 @@ export function CityMap({
                 type="button"
                 onMouseEnter={() => onHighlightTech(route.techId)}
                 onMouseLeave={() => onHighlightTech(null)}
-                onClick={() => onSelectJob(null)}
+                onClick={() => (followId === route.techId ? stopFollowing() : follow(route.techId))}
+                title={`Watch ${route.name}'s day animate`}
                 className={`flex items-center gap-1.5 rounded-[4px] px-1.5 py-1 text-[12.5px] transition-colors ${
-                  active ? 'bg-panel-2 text-foreground' : 'text-muted-foreground hover:text-foreground'
+                  followId === route.techId
+                    ? 'text-foreground'
+                    : active
+                      ? 'bg-panel-2 text-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
                 }`}
+                style={
+                  followId === route.techId
+                    ? { background: route.colour, color: 'oklch(0.19 0.02 250)' }
+                    : undefined
+                }
               >
                 <span
                   className="inline-block h-1 w-6 rounded-full"
-                  style={{ background: route.colour }}
+                  style={{ background: followId === route.techId ? 'oklch(0.19 0.02 250)' : route.colour }}
                 />
                 {route.name}
                 <span className="num text-[11px] opacity-70">

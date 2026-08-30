@@ -15,6 +15,7 @@ import { AnimatePresence, LayoutGroup, motion } from 'framer-motion';
 import { useCallback, useMemo, useState } from 'react';
 
 import { CASES, DEFAULT_CASE_ID, caseWindow, findCase } from '@/lib/cases';
+import { answer, parseCommand } from '@/lib/console';
 import {
   applyPlacement,
   bestPlacementOnTech,
@@ -35,6 +36,7 @@ import { DEFAULT_RULES, skillLabel } from '@/lib/types';
 
 import { BlockedPanel } from './BlockedPanel';
 import { CityMap } from './CityMap';
+import { Console, type ConsoleLine } from './Console';
 import { EmergencyForm } from './EmergencyForm';
 import { Header, type BoardView } from './Header';
 import { JobChip } from './JobChip';
@@ -80,6 +82,9 @@ export function DispatchBoard() {
   // Hovering a lane lights its route on the map, and vice versa.
   const [highlightTechId, setHighlightTechId] = useState<string | null>(null);
 
+  const [consoleOpen, setConsoleOpen] = useState(false);
+  const [consoleLines, setConsoleLines] = useState<ConsoleLine[]>([]);
+
   const colours = useMemo(() => skillColours(day), [day]);
   const boardWindow = useMemo(() => caseWindow(day), [day]);
 
@@ -107,6 +112,10 @@ export function DispatchBoard() {
     setHighlightTechId(null);
     setDragging(null);
     setView('timeline');
+  }, []);
+
+  const say = useCallback((text: string, tone: ConsoleLine['tone'] = 'info') => {
+    setConsoleLines((prev) => [...prev, { id: prev.length + 1, role: 'board', text, tone }]);
   }, []);
 
   const pickCase = useCallback(
@@ -326,6 +335,133 @@ export function DispatchBoard() {
 
   const draggedJob = dragging ? plan?.jobs[dragging.jobId] : undefined;
 
+  /**
+   * One entry point for everything the console can do. Commands that change the
+   * plan are routed to the very same handlers the buttons call, so the console
+   * cannot take a shortcut past a rule; read-only questions are answered by
+   * lib/console.ts from the plan as it stands.
+   */
+  const runCommand = useCallback(
+    (text: string) => {
+      setConsoleLines((prev) => [...prev, { id: prev.length + 1, role: 'you', text }]);
+
+      const ctx = { day, plan, caseIds: CASES.map((c) => c.id) };
+      const command = parseCommand(text, ctx);
+
+      const spoken = answer(command, ctx);
+      if (spoken) {
+        say(spoken.text, spoken.tone);
+        return;
+      }
+
+      const needsPlan = () => {
+        if (plan) return false;
+        say('There is no plan yet. Say "solve" first.', 'warn');
+        return true;
+      };
+
+      switch (command.kind) {
+        case 'solve':
+          generate();
+          say('Building the day plan…', 'ok');
+          return;
+        case 'clear':
+          reset();
+          say('Cleared. Say "solve" to build it again.', 'info');
+          return;
+        case 'restore':
+          if (!generated) return say('There is no generated plan to restore yet.', 'warn');
+          restoreGenerated();
+          say('Put back the plan the solver built.', 'ok');
+          return;
+        case 'view':
+          if (!plan) return say('There is no plan to show yet. Say "solve" first.', 'warn');
+          setView(command.view);
+          say(command.view === 'map' ? 'Showing the map.' : 'Showing the timeline.', 'info');
+          return;
+        case 'loadCase':
+          pickCase(command.caseId);
+          say(`Loaded ${command.caseId}. Say "solve" to plan it.`, 'ok');
+          return;
+        case 'setRule':
+          toggleReturnHome(command.requireReturnHome);
+          say(
+            command.requireReturnHome
+              ? 'Return-to-home is on. Re-solve to see what it costs.'
+              : 'Return-to-home is off, as the published case format allows.',
+            'info',
+          );
+          return;
+        case 'move': {
+          if (needsPlan()) return;
+          const job = plan!.jobs[command.jobId];
+          const tech = day.technicians.find((t) => t.id === command.techId)!;
+
+          // Work out the answer the same way `move` will, in the same order, so
+          // the console and the notice strip can never tell different stories.
+          if (sick.has(tech.id)) {
+            move(command.jobId, command.techId);
+            say(`${tech.name} is off sick today and is not taking work.`, 'warn');
+            return;
+          }
+          const from = findTechForJob(plan!, command.jobId);
+          if (from === tech.id) {
+            move(command.jobId, command.techId);
+            say(`${job.code} is already on ${tech.name}'s day.`, 'info');
+            return;
+          }
+
+          const lifted = from ? withoutJob(plan!, command.jobId, day.technicians) : plan!;
+          const verdict = bestPlacementOnTech(lifted, job, tech);
+          move(command.jobId, command.techId);
+          say(
+            verdict.ok
+              ? `Moved ${job.code} to ${tech.name}, starting ${formatTime(verdict.placement.result.start)}.`
+              : `${job.code} cannot go to ${tech.name}. ${verdict.rule}: ${verdict.detail}`,
+            verdict.ok ? 'ok' : 'warn',
+          );
+          return;
+        }
+        case 'unassign': {
+          if (needsPlan()) return;
+          const job = plan!.jobs[command.jobId];
+          if (!findTechForJob(plan!, command.jobId)) {
+            say(`${job.code} is not on anyone's day already.`, 'info');
+            return;
+          }
+          unassign(command.jobId);
+          say(`${job.code} taken off the board. It is unassigned, not blocked.`, 'ok');
+          return;
+        }
+        case 'sick': {
+          if (needsPlan()) return;
+          const tech = day.technicians.find((t) => t.id === command.techId)!;
+          if (sick.has(tech.id)) return say(`${tech.name} is already off sick.`, 'info');
+          const had = (plan!.routes[tech.id] ?? []).length;
+          markSick(tech.id);
+          say(`${tech.name} is off shift. Redistributing ${had} job${had === 1 ? '' : 's'}…`, 'ok');
+          return;
+        }
+        case 'emergency': {
+          if (needsPlan()) return;
+          raiseEmergency(command.job, command.at);
+          say(
+            `Raised a ${skillLabel(command.job.skill)} emergency in ${command.job.area} ` +
+              `(${formatDuration(command.job.durationMin)}), replanning from ${formatTime(command.at)}.`,
+            'ok',
+          );
+          return;
+        }
+        default:
+          say('I did not understand that. Type help to see what I can do.', 'warn');
+      }
+    },
+    [
+      day, plan, generated, sick, say, generate, reset, restoreGenerated, pickCase,
+      toggleReturnHome, move, unassign, markSick, raiseEmergency,
+    ],
+  );
+
   return (
     <DndContext
       sensors={sensors}
@@ -460,6 +596,14 @@ export function DispatchBoard() {
         </div>
       )}
     </div>
+
+      <Console
+        open={consoleOpen}
+        onOpenChange={setConsoleOpen}
+        lines={consoleLines}
+        onSubmit={runCommand}
+        caseLabel={day.label}
+      />
 
       <DragOverlay dropAnimation={null}>
         {draggedJob && (

@@ -56,6 +56,15 @@ Open the live URL and press **Build day plan**.
   check. All 25 are deliberate rejections, and the app names every one
   correctly.
 
+- **Ask the board.** Press `/` and type what you want: *"move J-13 to Kamal"*,
+  *"Rafiq is sick"*, *"why is J-21 blocked?"*, *"who can take J-05?"*,
+  *"emergency plumbing in Uttara at 2pm for 45 min"*, *"take J-09 off the
+  board"*, *"what can't be done?"*, *"load PUB-07"*. It does the thing and tells
+  you what happened, in the same sentences the board uses.
+
+  **It is a parser, not a language model, and that is on purpose** — see
+  [Why the console has no LLM](#why-the-console-has-no-llm).
+
 ### The three bonus features
 
 All four required items were working before any of these were started.
@@ -83,7 +92,7 @@ npm run dev     # http://localhost:3000
 ```
 
 ```bash
-npm test        # 53 tests: one per hard rule, all 25 published cases, the board markup
+npm test        # 77 tests: one per hard rule, all 25 published cases, the board markup
 npm run stats   # the better-than-random evidence table, case by case
 npm run build   # production build
 npm run lint
@@ -233,6 +242,42 @@ Every replan still routes each placement through `checkFeasible`, and the tests
 rebuild each resulting board forward from scratch to confirm every job is still
 legal where it now sits.
 
+## Why the console has no LLM
+
+The obvious way to build "type what you want" is to send the text to a language
+model. This app cannot, and the reason is worth stating rather than hiding.
+
+The stack was fixed at the start: **every page is a client component, there is
+no server component, no API route and no backend of any kind.** The whole thing
+is a static bundle. There is nowhere to keep a secret. Calling a model from the
+browser would mean shipping an API key to every visitor — which the submission
+rules forbid outright ("No password, API key, access token, private key…"), and
+which would be a real credential leak regardless of the rules. Proxying through
+a serverless function would mean adding the backend the brief explicitly
+excluded, and the live URL still has to work for a judge with no setup and no
+account.
+
+So the console parses instead. The vocabulary of this problem is small and
+closed — a dozen verbs, the technicians on today's roster, the jobs in today's
+case, its areas and its skills — and `lib/console.ts` covers it directly. What
+that buys, beyond legality:
+
+- **It never guesses.** "move J-05" with no technician named asks which one
+  rather than picking. Two names in one sentence asks which. Nonsense is
+  reported as nonsense and nothing happens.
+- **It cannot break a rule.** Every command that changes the plan is routed to
+  the very same handler the buttons call, so it goes through `checkFeasible`
+  like everything else. The console has no back door.
+- **It is testable.** 23 tests cover the grammar, including one that pulls every
+  example out of the help text and asserts the parser actually understands it —
+  so the help can never advertise a command that does not work.
+- **It works offline and costs nothing to run.**
+
+What it gives up is real conversation: it will not answer a question outside the
+dispatch domain, and it does not remember context between commands. For a
+dispatcher's console those are acceptable trades; for a general assistant they
+would not be.
+
 ## The decisions that mattered
 
 **Time is an integer number of minutes from midnight, everywhere.** 540 is 09:00.
@@ -337,6 +382,10 @@ matters on a dense board and in a screenshot.
 - **The map needs the network for its tiles.** Everything else in the app runs
   offline. Without tiles the map degrades to routes and areas on a plain
   background rather than failing.
+- **The console understands this problem only.** It is a domain parser, not a
+  general assistant: it holds no conversation state between commands and will
+  not answer anything outside dispatch. Ask it for help and it lists exactly
+  what it does know.
 
 ## What would come next
 
@@ -371,10 +420,12 @@ lib/
   replan.ts       the bonuses: sick technician, mid-day emergency
   score.ts        the plan score used to compare a hand-edited day
   moves.ts        previewMoves — the one verdict behind the drag and the dropdown
+  console.ts      the command grammar: parse text, answer questions
   palette.ts      per-case skill colour assignment
-  *.test.ts       53 tests
+  *.test.ts       77 tests
 components/board/ the header, the lanes, the city map, the blocked panel,
-                  the legend, the move control, the emergency form
+                  the legend, the move control, the emergency form,
+                  the console
 scripts/stats.ts  the better-than-random evidence table
 ```
 

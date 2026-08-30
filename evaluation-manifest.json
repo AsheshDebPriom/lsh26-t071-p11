@@ -17,7 +17,8 @@
     "backend": "none — every page is a client component; all computation runs in the browser",
     "database": "none",
     "drag_and_drop": "@dnd-kit/core 6.3.1",
-    "map": "Leaflet 1.9.4 (BSD-2-Clause), OpenStreetMap tiles via CARTO, attributed on the map"
+    "map": "Leaflet 1.9.4 (BSD-2-Clause), OpenStreetMap tiles via CARTO, attributed on the map",
+    "assistant": "Deterministic command parser (lib/console.ts). No LLM, no API key, no network — see README, \"Why the console has no LLM\"."
   },
   "data_source": {
     "primary": "data/P11_route_shift_public.json",
@@ -111,10 +112,16 @@
       "status": "complete",
       "where": "@dnd-kit/core in components/board/TechnicianLane.tsx and DispatchBoard.tsx, verdicts from lib/moves.ts",
       "evidence": "Picking up a job marks every lane with whether it may land and the rule if not, before the drop. Dropping on the blocked panel takes the job off the board. The dropdown remains as the keyboard route and shares the same verdict function. 5 tests."
+    },
+    {
+      "feature": "A dispatcher console — type a command in plain English and the board does it",
+      "status": "complete",
+      "where": "lib/console.ts (grammar and answers), components/board/Console.tsx, runCommand in DispatchBoard.tsx",
+      "evidence": "Understands move, assign, unassign, sick, emergency, solve, clear, restore, load a case, switch view, toggle the return-home rule, and answers why a job is blocked, who could take it, who is busiest and the day summary. Deterministic parser, no language model and no API key — the app is a static bundle with no server to hold a secret. Every plan-changing command routes to the same handler the buttons use, so it still goes through checkFeasible. It refuses to guess: a missing or ambiguous technician is asked about, not chosen. 23 tests, including one that asserts every example in the help text actually parses."
     }
   ],
   "verification": {
-    "tests": "npm test — 53 tests, covering one case per hard rule, all 25 published cases, route legality, timeline contiguity, blocked-list coverage, the better-than-random claim, server-rendered board markup, and all three bonus features",
+    "tests": "npm test — 77 tests, covering one case per hard rule, all 25 published cases, route legality, timeline contiguity, blocked-list coverage, the better-than-random claim, server-rendered board markup, and all three bonus features",
     "lint": "npm run lint — clean",
     "build": "npm run build — clean",
     "stats": "npm run stats — per-case optimised vs random comparison"
